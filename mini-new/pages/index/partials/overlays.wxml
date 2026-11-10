@@ -1,0 +1,531 @@
+<!-- 底部浮层：项目/批次切换、资料详情、台账编辑、创建表单、企业身份 -->
+<view wx:if="{{overlay}}" class="modal-mask" bindtap="closeOverlay">
+  <view class="sheet {{overlay==='document' || overlay==='ledger' || overlay==='salesDetail' || overlay==='requestedDetail' ? 'sheet-tall' : ''}}" catchtap="stopTap">
+    <view class="sheet-grabber"></view>
+      <view class="sheet-head">
+        <view class="sheet-title">
+          {{overlay==='context' ? '选择项目与批次' : overlay==='document' ? activeDocument.typeLabel : overlay==='ledger' ? activeLedger.batchName : overlay==='createProject' ? '新建项目' : overlay==='createBatch' ? '新建批次' : overlay==='editProject' ? '编辑项目' : overlay==='editBatch' ? '编辑批次' : overlay==='reminder' ? '每周对账提醒' : overlay==='salesDetail' ? '销售金额明细（网价）' : overlay==='requestedDetail' ? (activeRequested ? activeRequested.title : '请款明细') : overlay==='reconExport' ? '导出对账单' : '本单位身份'}}
+        </view>
+        <view class="sheet-head-actions">
+          <view wx:if="{{overlay==='ledger' && !ledgerEditing}}" class="sheet-head-btn" bindtap="beginLedgerEdit">编辑</view>
+          <view wx:if="{{overlay==='ledger' && ledgerEditing}}" class="sheet-head-btn ghost" bindtap="cancelLedgerEdit">取消</view>
+          <view class="sheet-close" bindtap="closeOverlay"><xicon name="close" size="32" color="#8a90a0" stroke="{{2}}" /></view>
+        </view>
+      </view>
+
+    <view class="sheet-body">
+      <scroll-view scroll-y class="sheet-scroll {{overlay==='context' ? 'sheet-scroll--footer' : ''}}" enhanced show-scrollbar="{{false}}">
+      <view class="sheet-pad">
+
+      <!-- 项目 / 批次选择：左右两栏联动 -->
+      <block wx:if="{{overlay==='context'}}">
+        <view class="ctx-picker">
+          <view class="ctx-toolbar">
+            <view class="searchbar ctx-search">
+              <xicon name="search" size="28" color="#8a90a0" />
+              <input class="searchbar-input" value="{{contextQuery}}" placeholder="搜索项目" placeholder-class="composer-ph" bindinput="updateContextQuery" />
+            </view>
+          </view>
+
+          <view class="ctx-cols">
+            <!-- 左栏：项目（平分） -->
+            <view class="ctx-col ctx-col-left">
+              <view class="ctx-col-head">
+                <xicon name="layers" size="22" color="#2f66f6" />
+                <text class="ctx-col-head-title">项目</text>
+                <text class="ctx-col-head-sub">{{contextProjects.length}} 个</text>
+              </view>
+              <scroll-view scroll-y class="ctx-col-scroll" enhanced show-scrollbar="{{false}}">
+                <view
+                  wx:for="{{contextProjects}}"
+                  wx:key="id"
+                  class="ctx-item ctx-project {{contextTempProjectId===item.id ? 'is-active' : ''}}"
+                  data-id="{{item.id}}"
+                  bindtap="chooseContextProject"
+                  hover-class="ctx-item-hover"
+                >
+                  <view class="ctx-project-mark">{{item.letter}}</view>
+                  <view class="ctx-item-copy">
+                    <view class="ctx-item-name text-ellipsis">{{item.name}}</view>
+                    <view class="ctx-item-meta">{{item.batches.length}} 个批次</view>
+                  </view>
+                  <view class="ctx-item-del" data-id="{{item.id}}" catchtap="deleteProject" aria-role="button" aria-label="删除项目">
+                    <xicon name="trash" size="24" color="#c2c7d2" />
+                  </view>
+                  <xicon class="ctx-drill {{contextTempProjectId===item.id ? 'is-on' : ''}}" name="chevronRight" size="24" color="{{contextTempProjectId===item.id ? '#2f66f6' : '#c2c7d2'}}" />
+                </view>
+                <view wx:if="{{!contextProjects.length}}" class="ctx-empty-sm">没有匹配的项目</view>
+              </scroll-view>
+            </view>
+
+            <!-- 中缝分隔线 -->
+            <view class="ctx-col-divider"></view>
+
+            <!-- 右栏：批次（平分） -->
+            <view class="ctx-col ctx-col-right">
+              <view class="ctx-col-head ctx-col-head-batch">
+                <view class="ctx-crumb">
+                  <text class="ctx-crumb-parent text-ellipsis">{{tempProjectName || '未选择项目'}}</text>
+                  <xicon name="chevronRight" size="20" color="#b6bcc8" />
+                  <text class="ctx-crumb-leaf">批次</text>
+                </view>
+              </view>
+              <scroll-view scroll-y class="ctx-col-scroll" enhanced show-scrollbar="{{false}}">
+                <view
+                  wx:for="{{contextBatches}}"
+                  wx:key="id"
+                  class="ctx-item ctx-batch {{contextTempBatchId===item.id ? 'is-active' : ''}}"
+                  data-id="{{item.id}}"
+                  bindtap="chooseContextBatch"
+                  hover-class="ctx-item-hover"
+                >
+                  <view class="ctx-item-copy">
+                    <view class="ctx-item-name text-ellipsis">{{item.name}}</view>
+                    <view class="ctx-item-meta text-ellipsis">{{item.materialText || '待补充材料'}}</view>
+                  </view>
+                  <view class="ctx-item-del" data-id="{{item.id}}" data-project-id="{{contextTempProjectId}}" catchtap="deleteBatch" aria-role="button" aria-label="删除批次">
+                    <xicon name="trash" size="24" color="#c2c7d2" />
+                  </view>
+                  <view class="ctx-check {{contextTempBatchId===item.id ? 'is-on' : ''}}">
+                    <xicon wx:if="{{contextTempBatchId===item.id}}" name="check" size="20" color="#ffffff" />
+                  </view>
+                </view>
+                <view wx:if="{{!tempProjectName}}" class="ctx-empty">请先在左侧选择一个项目</view>
+                <view wx:elif="{{!contextBatches.length}}" class="ctx-empty">
+                  当前项目还没有批次
+                  <view class="btn btn-ghost ctx-empty-btn" bindtap="openCreateBatchFromContext">创建第一个批次</view>
+                </view>
+              </scroll-view>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <!-- 资料详情 / 编辑 -->
+      <block wx:elif="{{overlay==='document' && activeDocument}}">
+        <view class="detail-tabs">
+          <view class="detail-tab {{documentSection==='data' ? 'is-active' : ''}}" data-section="data" bindtap="setDocumentSection">入库数据</view>
+          <view class="detail-tab {{documentSection==='source' ? 'is-active' : ''}}" data-section="source" bindtap="setDocumentSection">原始资料</view>
+        </view>
+
+        <block wx:if="{{documentSection==='data'}}">
+          <view class="detail-status {{activeDocument.statusTone==='red' ? 'tint-red' : activeDocument.statusLabel==='已入库' ? 'tint-green' : 'tint-blue'}}">
+            <xicon name="{{activeDocument.statusLabel==='已入库' ? 'check' : 'warning'}}" size="30" color="currentColor" />
+            <view class="detail-status-copy">
+              <text class="detail-status-title">{{activeDocument.statusLabel}}</text>
+              <text class="detail-status-sub">{{activeDocument.statusLabel==='已入库' ? '已进入当前批次，修改后同步更新台账。' : '核对无误后确认进入当前批次台账。'}}</text>
+            </view>
+          </view>
+
+          <!-- 只读概览 -->
+          <view wx:if="{{!documentEditing}}" class="overview">
+            <view class="overview-primary">
+              <view><text>{{activeDocument.partyLabel}}</text><text class="overview-primary-val text-ellipsis">{{activeDocument.document.supplierName || '待补充'}}</text></view>
+              <view><text>{{activeDocument.amountLabel}}</text><text class="overview-primary-val">{{activeDocument.amountText}}</text></view>
+            </view>
+            <view class="overview-row"><text>{{activeDocument.codeLabel}}</text><view class="text-ellipsis">{{activeDocument.document.docCode || activeDocument.document.fileName || '未识别'}}</view></view>
+            <view class="overview-row"><text>{{activeDocument.dateLabel}}</text><view>{{activeDocument.dateText}}</view></view>
+            <view wx:if="{{activeDocument.isPurchaseFinance}}" class="overview-row"><text>费用归属</text><view>{{activeDocument.expenseCategory==='transport' ? '运输费用' : '材料采购'}}</view></view>
+            <block wx:if="{{activeDocument.document.docType==='delivery_note'}}">
+              <view class="overview-row"><text>采购运费</text><view>{{activeDocument.deliveryFreightText || '未标注（无则不计）'}}</view></view>
+              <view class="overview-row"><text>销售运费</text><view>{{activeDocument.salesFreightText || '未标注（无则不计）'}}</view></view>
+              <view class="overview-row"><text>承运单位</text><view>{{activeDocument.carrierNameText || '未标注'}}</view></view>
+              <view wx:if="{{activeDocument.pricingNoteText}}" class="overview-row"><text>销售定价</text><view>{{activeDocument.pricingNoteText}}</view></view>
+            </block>
+            <block wx:if="{{activeDocument.isInvoice}}">
+              <view class="overview-row"><text>税率</text><view>{{activeDocument.taxRate || '-'}}</view></view>
+              <view class="overview-row"><text>不含税金额</text><view>{{activeDocument.netAmount || '-'}}</view></view>
+              <view class="overview-row"><text>税额</text><view>{{activeDocument.taxAmount || '-'}}</view></view>
+            </block>
+          </view>
+
+          <!-- 编辑表单 -->
+          <view wx:else class="edit-form">
+            <!-- 待补充提示（对齐 Web missingFieldLabels） -->
+            <view wx:if="{{documentDraft.missingFields.length}}" class="edit-hint">
+              <xicon name="warning" size="26" color="#c8781f" />
+              <text class="edit-hint-text">还需补充：{{documentDraft.missingFieldText}}</text>
+            </view>
+
+            <!-- 业务类型：分段选择器（对齐 Web 的 doc-type-editor） -->
+            <view class="field">
+              <view class="field-label">业务类型</view>
+              <scroll-view class="doc-chip-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+                <view class="doc-chip-row">
+                  <view
+                    wx:for="{{editableDocTypes}}"
+                    wx:key="value"
+                    class="doc-chip {{documentDraft.docType===item.value ? 'is-active' : ''}} {{activeDocument.statusLabel==='已入库' ? 'is-locked' : ''}}"
+                    data-value="{{item.value}}"
+                    bindtap="changeDocumentTypeByValue"
+                  >{{item.label}}</view>
+                </view>
+              </scroll-view>
+            </view>
+
+            <view class="field"><view class="field-label">{{documentDraft.partyLabel}}</view><input class="field-input" cursor-spacing="24" value="{{documentDraft.supplierName}}" data-field="supplierName" bindinput="updateDocumentField" /></view>
+            <view class="field-2col">
+              <view class="field"><view class="field-label">{{documentDraft.codeLabel}}</view><input class="field-input" cursor-spacing="24" value="{{documentDraft.docCode}}" data-field="docCode" bindinput="updateDocumentField" /></view>
+              <view class="field"><view class="field-label">{{documentDraft.dateLabel}}</view><picker mode="date" value="{{documentDraft.docDate}}" bindchange="updateDocumentDate"><view class="picker-value">{{documentDraft.docDate || '选择日期'}}</view></picker></view>
+            </view>
+            <view class="field"><view class="field-label">{{documentDraft.amountLabel}}</view><input class="field-input" cursor-spacing="24" type="digit" value="{{documentDraft.amount}}" data-field="amount" bindinput="updateDocumentField" /></view>
+
+            <!-- 送货单销售侧字段（对齐 web 数据中心编辑区）：承运单位/采购运费/销售运费 -->
+            <block wx:if="{{documentDraft.isDelivery}}">
+              <view class="field"><view class="field-label">承运单位（选填）</view><input class="field-input" cursor-spacing="24" value="{{documentDraft.carrierName}}" placeholder="运输单上有则填，无则留空" data-field="carrierName" bindinput="updateDocumentField" /></view>
+              <view class="field-2col">
+                <view class="field"><view class="field-label">采购运费（选填）</view><input class="field-input" cursor-spacing="24" type="digit" value="{{documentDraft.transportFee}}" placeholder="我方承担，进运输费用行" data-field="transportFee" bindinput="updateDocumentField" /></view>
+                <view class="field"><view class="field-label">销售运费（选填）</view><input class="field-input" cursor-spacing="24" type="digit" value="{{documentDraft.salesFreight}}" placeholder="客户承担，进销售总金额" data-field="salesFreight" bindinput="updateDocumentField" /></view>
+              </view>
+            </block>
+
+            <!-- 金额差异（采购单，编辑中实时，对齐 Web amountMismatch 处理） -->
+            <view wx:if="{{documentDraft.amountMismatch}}" class="edit-mismatch">
+              <view class="edit-mismatch-text">
+                <xicon name="warning" size="26" color="#c8781f" />
+                <text>单据总额 {{documentDraft.amountText}} 与明细合计 {{documentDraft.itemTotalText}} 不一致</text>
+              </view>
+              <view class="edit-mismatch-actions">
+                <view class="edit-mismatch-btn" data-decision="keep_source" bindtap="setAmountMismatchDecision">保留单据总额</view>
+                <view class="edit-mismatch-btn is-primary" data-decision="sync_items" bindtap="setAmountMismatchDecision">以明细合计为准</view>
+              </view>
+            </view>
+
+            <view wx:if="{{documentDraft.isPurchaseFinance}}" class="field switch-field">
+              <view class="field-label">费用归属</view>
+              <view class="switch-row"><switch color="#2f66f6" checked="{{documentDraft.expenseCategory==='transport'}}" bindchange="changeExpenseCategory" /><text>{{documentDraft.expenseCategory==='transport' ? '运输费用' : '材料采购'}}</text></view>
+            </view>
+            <block wx:if="{{documentDraft.isInvoice}}">
+              <view class="field-2col">
+                <view class="field"><view class="field-label">税率</view><input class="field-input" cursor-spacing="24" value="{{documentDraft.taxRate}}" data-field="taxRate" bindinput="updateDocumentField" /></view>
+                <view class="field"><view class="field-label">不含税金额</view><input class="field-input" cursor-spacing="24" type="digit" value="{{documentDraft.netAmount}}" data-field="netAmount" bindinput="updateDocumentField" /></view>
+              </view>
+              <view class="field"><view class="field-label">税额</view><input class="field-input" cursor-spacing="24" type="digit" value="{{documentDraft.taxAmount}}" data-field="taxAmount" bindinput="updateDocumentField" /></view>
+            </block>
+          </view>
+
+          <!-- 材料明细 -->
+          <view wx:if="{{documentDraft.supportsItems && (documentDraft.items.length || documentEditing)}}" class="detail-section">
+            <view class="detail-section-head">
+              <view class="detail-section-title">材料与数量明细</view>
+              <view wx:if="{{documentEditing}}" class="card-link" bindtap="addDocumentItem">+ 新增明细</view>
+              <text wx:else class="list-head-count">{{documentDraft.items.length}} 项</text>
+            </view>
+            <view wx:for="{{documentDraft.items}}" wx:key="id" wx:for-item="line" class="item-line">
+              <view class="item-line-head">
+                <view class="item-line-name text-ellipsis">{{line.materialName || '未标注材料'}}</view>
+                <view wx:if="{{documentEditing}}" class="item-line-del" data-index="{{index}}" bindtap="removeDocumentItem"><xicon name="trash" size="28" color="#ef4d4d" /></view>
+                <text wx:else class="item-line-amount">{{line.amountText}}</text>
+              </view>
+              <view wx:if="{{!documentEditing}}" class="item-readonly">
+                <text class="item-readonly-spec">{{line.spec || '未标注规格'}}</text>
+                <view class="item-readonly-nums">
+                  <text>计价 {{line.quantityText}}</text>
+                  <text wx:if="{{line.packageText !== '-'}}">件数 {{line.packageText}}</text>
+                  <text wx:if="{{line.weightText !== '-'}}">重量 {{line.weightText}}</text>
+                  <text wx:if="{{documentDraft.docType === 'supply_order'}}">销售价 {{line.salesUnitPriceText}}</text>
+                </view>
+              </view>
+              <view wx:else class="item-edit">
+                <view class="field-2col">
+                  <view class="field"><view class="field-label">材料</view><input class="field-input" cursor-spacing="24" value="{{line.materialName}}" data-index="{{index}}" data-field="materialName" bindinput="updateDocumentItem" /></view>
+                  <view class="field"><view class="field-label">规格</view><input class="field-input" cursor-spacing="24" value="{{line.spec}}" data-index="{{index}}" data-field="spec" bindinput="updateDocumentItem" /></view>
+                </view>
+                <block wx:if="{{documentDraft.supportsItems}}">
+                  <view class="field-2col">
+                    <view class="field"><view class="field-label">件数</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.packageQuantity}}" data-index="{{index}}" data-field="packageQuantity" bindinput="updateDocumentItem" /></view>
+                    <view class="field"><view class="field-label">件数单位</view><input class="field-input" cursor-spacing="24" value="{{line.packageUnit}}" data-index="{{index}}" data-field="packageUnit" bindinput="updateDocumentItem" /></view>
+                  </view>
+                  <view class="field-2col">
+                    <view class="field"><view class="field-label">单重</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.unitWeight}}" data-index="{{index}}" data-field="unitWeight" bindinput="updateDocumentItem" /></view>
+                    <view class="field"><view class="field-label">重量单位</view><input class="field-input" cursor-spacing="24" value="{{line.weightUnit}}" data-index="{{index}}" data-field="weightUnit" bindinput="updateDocumentItem" /></view>
+                  </view>
+                <view class="field-2col">
+                  <view class="field"><view class="field-label">总重量</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.totalWeight}}" data-index="{{index}}" data-field="totalWeight" bindinput="updateDocumentItem" /></view>
+                  <view class="field"><view class="field-label">产地</view><input class="field-input" cursor-spacing="24" value="{{line.origin}}" placeholder="如：沙钢" data-index="{{index}}" data-field="origin" bindinput="updateDocumentItem" /></view>
+                </view>
+                </block>
+                <view class="field-2col">
+                  <view class="field"><view class="field-label">计价数量</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.pricingQuantity}}" data-index="{{index}}" data-field="pricingQuantity" bindinput="updateDocumentItem" /></view>
+                  <view class="field"><view class="field-label">计价单位</view><input class="field-input" cursor-spacing="24" value="{{line.pricingUnit}}" data-index="{{index}}" data-field="pricingUnit" bindinput="updateDocumentItem" /></view>
+                </view>
+                <view class="field-2col">
+                  <view class="field"><view class="field-label">单价</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.unitPrice}}" data-index="{{index}}" data-field="unitPrice" bindinput="updateDocumentItem" /></view>
+                  <view class="field"><view class="field-label">金额</view><input class="field-input" cursor-spacing="24" type="digit" value="{{line.amount}}" data-index="{{index}}" data-field="amount" bindinput="updateDocumentItem" /></view>
+                </view>
+                <view wx:if="{{documentDraft.docType === 'supply_order'}}" class="item-edit-hint">销售价 {{line.salesUnitPriceText}}（按批次口径由采购价推算，改价请在网页端操作）</view>
+              </view>
+            </view>
+          </view>
+
+          <view class="sheet-actions">
+            <block wx:if="{{documentEditing}}">
+              <view class="btn btn-ghost sheet-btn" bindtap="cancelDocumentEdit">取消</view>
+              <view class="btn btn-primary sheet-btn {{busy ? 'is-disabled' : ''}}" bindtap="saveDocument">保存并同步</view>
+            </block>
+            <block wx:else>
+              <view class="btn btn-ghost sheet-btn" bindtap="beginDocumentEdit">修改数据</view>
+              <view wx:if="{{activeDocument.statusLabel !== '已入库' && activeDocument.statusLabel !== '重复归档'}}" class="btn btn-primary sheet-btn {{busy ? 'is-disabled' : ''}}" bindtap="confirmActiveDocument"><xicon name="check" size="30" color="#ffffff" />确认并入库</view>
+            </block>
+          </view>
+        </block>
+
+        <!-- 原始资料 -->
+        <block wx:else>
+          <view class="source-box">
+            <view class="source-ico tint-{{activeDocument.typeTone}}"><xicon name="{{activeDocument.typeIcon}}" size="44" color="currentColor" /></view>
+            <view class="source-copy">
+              <view class="source-name text-ellipsis">{{activeDocument.document.fileName || activeDocument.document.docCode || '文本业务资料'}}</view>
+              <view class="source-sub">{{activeDocument.sourceLabel}} · 识别 {{activeDocument.confidenceText || '待核验'}}</view>
+            </view>
+          </view>
+          <view wx:if="{{activeDocument.document.guidanceText}}" class="source-block"><view class="source-block-title">处理说明</view><text>{{activeDocument.document.guidanceText}}</text></view>
+          <view wx:if="{{activeDocument.document.aiSummary}}" class="source-block"><view class="source-block-title">AI 摘要</view><text>{{activeDocument.document.aiSummary}}</text></view>
+          <view wx:if="{{activeDocument.document.sourceText}}" class="source-block"><view class="source-block-title">识别文本</view><text selectable>{{activeDocument.document.sourceText}}</text></view>
+          <view class="btn btn-primary sheet-btn sheet-btn-block" bindtap="previewSource"><xicon name="image" size="30" color="#ffffff" />打开原始附件</view>
+        </block>
+      </block>
+
+      <!-- 台账详情 -->
+      <block wx:elif="{{overlay==='ledger' && activeLedger}}">
+        <view class="ledger-detail-hero">
+          <view class="ledger-detail-hero-copy">
+            <text class="ledger-detail-hero-label">采购及运输成本</text>
+            <text class="ledger-detail-hero-value">{{activeLedger.purchaseText}}</text>
+            <text class="ledger-detail-hero-meta text-ellipsis">{{activeLedger.projectName}} · {{activeLedger.dateText}}</text>
+          </view>
+          <view class="badge tint-{{activeLedger.statusTone}}"><view class="badge-dot"></view>{{activeLedger.statusLabel}}</view>
+        </view>
+
+        <view class="ledger-summary">
+          <view class="ledger-summary-cell"><text>已付款</text><text class="ledger-summary-val">{{activeLedger.paidText}}</text><text wx:if="{{activeLedger.unpaid > 0}}" class="tone-orange ledger-summary-sub">待付 {{activeLedger.unpaidText}}</text></view>
+          <view class="ledger-summary-cell"><text>进项发票</text><text class="ledger-summary-val">{{activeLedger.invoiceText}}</text><text wx:if="{{activeLedger.invoiceGap > 0}}" class="tone-red ledger-summary-sub">缺票 {{activeLedger.invoiceGapText}}</text></view>
+          <view class="ledger-summary-cell"><text>销售 / 已收</text><text class="ledger-summary-val">{{activeLedger.salesText}}</text><text class="ledger-summary-sub">已收 {{activeLedger.receivedText}}</text></view>
+          <view class="ledger-summary-cell"><text>毛利润</text><text class="ledger-summary-val {{activeLedger.profit < 0 ? 'tone-red' : 'tone-green'}}">{{activeLedger.profitText}}</text><text class="ledger-summary-sub">毛利率 {{activeLedger.marginText}}</text></view>
+        </view>
+
+        <view class="detail-section">
+          <view class="detail-section-head">
+            <view class="detail-section-title">销售与回款</view>
+            <text class="list-head-count">{{ledgerEditing ? '编辑中' : '人工补充'}}</text>
+          </view>
+
+          <!-- 实时毛利预览（编辑时，对齐 Web 改销售金额即预览毛利/率） -->
+          <view wx:if="{{ledgerEditing}}" class="ledger-preview">
+            <view class="ledger-preview-cell">
+              <text>预计毛利</text>
+              <text class="ledger-preview-val {{ledgerDraft.previewProfit < 0 ? 'tone-red' : 'tone-green'}}">{{ledgerDraft.previewProfitText}}</text>
+            </view>
+            <view class="ledger-preview-cell">
+              <text>预计毛利率</text>
+              <text class="ledger-preview-val">{{ledgerDraft.previewMarginText}}</text>
+            </view>
+          </view>
+
+          <!-- 只读视图 -->
+          <block wx:if="{{!ledgerEditing}}">
+            <view class="ro-row"><text>销售订单号</text><view class="text-ellipsis">{{ledgerDraft.salesOrder || '未填写'}}</view></view>
+            <view class="ro-row"><text>销售金额</text><text class="ro-row-val">{{ledgerDraft.salesAmountText || '未填写'}}</text></view>
+            <view class="ro-row ro-row-link" bindtap="openSalesDetail" data-batch-id="{{activeLedger.id}}" data-batch-name="{{activeLedger.batchName}}"><text>销售金额明细（网价）</text><view class="ro-row-val tone-blue">查看明细 ›</view></view>
+            <view class="ro-row"><text>项目经理</text><view class="text-ellipsis">{{ledgerDraft.projectManager || '未填写'}}</view></view>
+            <view class="ro-row"><text>实际回款日期</text><view>{{ledgerDraft.receiptDate || '未填写'}}</view></view>
+            <view class="ro-row"><text>约定回款日期</text><view>{{ledgerDraft.requiredReceiptDate || '未填写'}}</view></view>
+            <view class="ro-row"><text>月结</text><view>{{ledgerDraft.isMonthlySettlement ? '是（按要求回款日期计加价利息）' : '否'}}</view></view>
+            <view wx:if="{{activeLedger.isMonthlySettlement && activeLedger.interest > 0}}" class="ro-row"><text>月结利息</text><text class="ro-row-val tone-orange">{{activeLedger.interestText}}</text></view>
+          </block>
+
+          <!-- 编辑视图 -->
+          <block wx:else>
+            <view class="field"><view class="field-label">销售订单号</view><input class="field-input" cursor-spacing="24" value="{{ledgerDraft.salesOrder}}" data-field="salesOrder" bindinput="updateLedgerField" /></view>
+            <view class="field-2col">
+              <view class="field"><view class="field-label">销售金额</view><input class="field-input" cursor-spacing="24" type="digit" value="{{ledgerDraft.salesAmount}}" data-field="salesAmount" bindinput="updateLedgerField" /></view>
+              <view class="field"><view class="field-label">项目经理</view><input class="field-input" cursor-spacing="24" value="{{ledgerDraft.projectManager}}" data-field="projectManager" bindinput="updateLedgerField" /></view>
+            </view>
+            <view class="field switch-field">
+              <view class="field-label">月结（按要求回款日期计算加价利息）</view>
+              <view class="switch-row"><switch color="#2f66f6" checked="{{ledgerDraft.isMonthlySettlement}}" bindchange="toggleMonthlySettlement" /><text>{{ledgerDraft.isMonthlySettlement ? '是' : '否'}}</text></view>
+            </view>
+            <view class="field-2col">
+              <view class="field"><view class="field-label">实际回款日期</view><picker mode="date" value="{{ledgerDraft.receiptDate}}" data-field="receiptDate" bindchange="updateLedgerDate"><view class="picker-value">{{ledgerDraft.receiptDate || '选择'}}</view></picker></view>
+              <view class="field"><view class="field-label">约定回款日期</view><picker mode="date" value="{{ledgerDraft.requiredReceiptDate}}" data-field="requiredReceiptDate" bindchange="updateLedgerDate"><view class="picker-value">{{ledgerDraft.requiredReceiptDate || '选择'}}</view></picker></view>
+            </view>
+          </block>
+        </view>
+
+        <view wx:if="{{activeLedger.materialRows.length}}" class="detail-section">
+          <view class="detail-section-head"><view class="detail-section-title">材料采购与交付</view><text class="list-head-count">{{activeLedger.materialRows.length}} 项</text></view>
+          <view wx:for="{{activeLedger.materialRows}}" wx:key="key" wx:for-item="line" class="ledger-line">
+            <view class="ledger-line-head">
+              <view class="ledger-line-copy"><view class="text-ellipsis">{{line.material}}</view><text class="text-ellipsis">{{line.spec}} · {{line.supplier || '待补充供应商'}}</text></view>
+              <text class="ledger-line-amount">{{line.purchaseAmountText}}</text>
+            </view>
+            <view class="ledger-line-meta"><text>采购 {{line.purchaseText}}</text><text class="tone-{{line.deliveryTone}}">{{line.deliveryStatus}} · {{line.deliveryText}}</text></view>
+          </view>
+        </view>
+
+        <view wx:if="{{activeLedger.transportRows.length}}" class="detail-section">
+          <view class="detail-section-head"><view class="detail-section-title">运输费用</view><text class="list-head-count">{{activeLedger.transportRows.length}} 笔</text></view>
+          <view wx:for="{{activeLedger.transportRows}}" wx:key="id" wx:for-item="line" class="transport-line">
+            <view class="transport-ico tint-orange"><xicon name="truck" size="30" color="currentColor" /></view>
+            <view class="transport-copy"><view class="text-ellipsis">{{line.supplier}}</view><text class="text-ellipsis">{{line.code}} · {{line.dateText}}</text></view>
+            <view class="transport-amount">{{line.amountText}}</view>
+          </view>
+        </view>
+
+        <view wx:if="{{ledgerEditing}}" class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="saveLedger"><xicon name="check" size="30" color="#ffffff" />保存批次信息</view>
+      </block>
+
+      <!-- 新建项目 -->
+      <block wx:elif="{{overlay==='createProject'}}">
+        <view class="field"><view class="field-label">项目名称 *</view><input class="field-input" cursor-spacing="24" value="{{newProjectForm.name}}" data-field="name" placeholder="例如：滨江中心幕墙工程" placeholder-class="composer-ph" bindinput="updateProjectForm" /></view>
+        <view class="field"><view class="field-label">客户名称</view><input class="field-input" cursor-spacing="24" value="{{newProjectForm.customerName}}" data-field="customerName" placeholder="项目对应客户" placeholder-class="composer-ph" bindinput="updateProjectForm" /></view>
+        <view class="field-2col">
+          <view class="field"><view class="field-label">首批名称 *</view><input class="field-input" cursor-spacing="24" value="{{newProjectForm.batchName}}" data-field="batchName" bindinput="updateProjectForm" /></view>
+          <view class="field"><view class="field-label">业务日期 *</view><picker mode="date" value="{{newProjectForm.businessDate}}" bindchange="updateProjectDate"><view class="picker-value">{{newProjectForm.businessDate}}</view></picker></view>
+        </view>
+        <view class="field"><view class="field-label">材料摘要 *</view><textarea class="field-textarea" cursor-spacing="24" value="{{newProjectForm.materialSummary}}" data-field="materialSummary" placeholder="例如：镀锌方管、铝板、结构胶" placeholder-class="composer-ph" bindinput="updateProjectForm" /></view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="createProject"><xicon name="check" size="30" color="#ffffff" />创建并进入</view>
+      </block>
+
+      <!-- 新建批次 -->
+      <block wx:elif="{{overlay==='createBatch'}}">
+        <view class="field"><view class="field-label">归属项目</view><view class="picker-value picker-value-static text-ellipsis">{{currentProject.name}}</view></view>
+        <view class="field-2col">
+          <view class="field"><view class="field-label">批次名称 *</view><input class="field-input" cursor-spacing="24" value="{{newBatchForm.name}}" data-field="name" bindinput="updateBatchForm" /></view>
+          <view class="field"><view class="field-label">业务日期 *</view><picker mode="date" value="{{newBatchForm.businessDate}}" bindchange="updateBatchDate"><view class="picker-value">{{newBatchForm.businessDate}}</view></picker></view>
+        </view>
+        <view class="field"><view class="field-label">材料摘要 *</view><textarea class="field-textarea" cursor-spacing="24" value="{{newBatchForm.materialSummary}}" data-field="materialSummary" placeholder="本批次主要采购内容" placeholder-class="composer-ph" bindinput="updateBatchForm" /></view>
+        <view class="field"><view class="field-label">备注</view><textarea class="field-textarea" cursor-spacing="24" value="{{newBatchForm.remark}}" data-field="remark" placeholder="选填" placeholder-class="composer-ph" bindinput="updateBatchForm" /></view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="createBatch"><xicon name="check" size="30" color="#ffffff" />创建并切换</view>
+      </block>
+
+      <!-- 编辑项目 -->
+      <block wx:elif="{{overlay==='editProject'}}">
+        <view class="field"><view class="field-label">项目名称 *</view><input class="field-input" cursor-spacing="24" value="{{editForm.name}}" data-field="name" bindinput="updateEditForm" /></view>
+        <view class="field"><view class="field-label">客户名称</view><input class="field-input" cursor-spacing="24" value="{{editForm.customerName}}" data-field="customerName" placeholder="项目对应客户" bindinput="updateEditForm" /></view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="saveEditProject"><xicon name="check" size="30" color="#ffffff" />保存修改</view>
+      </block>
+
+      <!-- 编辑批次 -->
+      <block wx:elif="{{overlay==='editBatch'}}">
+        <view class="field"><view class="field-label">批次名称 *</view><input class="field-input" cursor-spacing="24" value="{{editForm.name}}" data-field="name" bindinput="updateEditForm" /></view>
+        <view class="field"><view class="field-label">业务日期</view><picker mode="date" value="{{editForm.businessDate}}" bindchange="updateEditDate"><view class="picker-value">{{editForm.businessDate || '选择日期'}}</view></picker></view>
+        <view class="field"><view class="field-label">材料摘要 *</view><textarea class="field-textarea" cursor-spacing="24" value="{{editForm.materialSummary}}" data-field="materialSummary" bindinput="updateEditForm" /></view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="saveEditBatch"><xicon name="check" size="30" color="#ffffff" />保存修改</view>
+      </block>
+
+      <!-- 销售金额明细（网价锁定值，可修正；含销售运费条目，对齐 web salesDetail 弹框） -->
+      <block wx:elif="{{overlay==='salesDetail' && activeSales}}">
+        <view class="detail-status tint-blue">
+          <xicon name="cash" size="30" color="currentColor" />
+          <view class="detail-status-copy">
+            <text class="detail-status-title">销售金额明细（网价）</text>
+            <text class="detail-status-sub">{{activeSales.batchName}} · 累计 {{activeSales.totalText}}</text>
+          </view>
+        </view>
+        <view wx:if="{{activeSales.loading}}" class="billing-loading">加载中…</view>
+        <block wx:else>
+          <view wx:if="{{!activeSales.rows.length}}" class="billing-empty">暂无送货明细</view>
+          <view
+            wx:for="{{activeSales.rows}}"
+            wx:key="rowKey"
+            wx:for-item="line"
+            class="sales-detail-row {{line.isFreight ? 'is-freight' : ''}}"
+          >
+            <view class="sd-head">
+              <text class="sd-date">{{line.docDateText}}</text>
+              <text class="sd-code text-ellipsis">{{line.docCode || '-'}}</text>
+              <text class="sd-amount">{{line.amountText}}</text>
+            </view>
+            <view class="sd-body">
+              <text class="sd-material {{line.isFreight ? 'tone-muted' : ''}}">{{line.materialText}}</text>
+              <text wx:if="{{line.quoteText}}" class="sd-quote">{{line.quoteText}}</text>
+              <text wx:if="{{line.pricingNote}}" class="sd-note">{{line.pricingNote}}</text>
+            </view>
+            <view wx:if="{{!line.isFreight}}" class="sd-nums">
+              <text>网价 {{line.quotePriceText}}</text>
+              <text>销售单价 {{line.salesUnitPriceText}}</text>
+              <text>计价 {{line.quantityText}}</text>
+              <text wx:if="{{line.status === 'manual'}}" class="tone-orange">人工</text>
+            </view>
+            <view wx:if="{{line.isFreight}}" class="sd-nums"><text class="tone-muted">客户承担的运费，已计入台账销售总金额</text></view>
+          </view>
+        </block>
+      </block>
+
+      <!-- 对账单导出（日期范围，对齐 web 台账页「导出对账单」） -->
+      <block wx:elif="{{overlay==='reconExport'}}">
+        <view class="identity-tip"><xicon name="bill" size="30" color="#3550d6" />按送货单日期取明细，累计供应量 / 供货金额 / 已支付按项目统计至结束日（含本次）。</view>
+        <view class="field-2col">
+          <view class="field"><view class="field-label">开始日期</view><picker mode="date" value="{{reconExportForm.start}}" data-field="start" bindchange="updateReconExportDate"><view class="picker-value">{{reconExportForm.start}}</view></picker></view>
+          <view class="field"><view class="field-label">结束日期</view><picker mode="date" value="{{reconExportForm.end}}" data-field="end" bindchange="updateReconExportDate"><view class="picker-value">{{reconExportForm.end}}</view></picker></view>
+        </view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="downloadReconciliationExport"><xicon name="download" size="30" color="#ffffff" />下载对账单</view>
+      </block>
+
+      <!-- 请款明细（材料/运输两维度，按笔次列出；对齐 web requestedDetail） -->
+      <block wx:elif="{{overlay==='requestedDetail' && activeRequested}}">
+        <view class="detail-status tint-blue">
+          <xicon name="cash" size="30" color="currentColor" />
+          <view class="detail-status-copy">
+            <text class="detail-status-title">{{activeRequested.title}}</text>
+            <text class="detail-status-sub">{{activeRequested.subtitle}}</text>
+          </view>
+        </view>
+        <view wx:if="{{!activeRequested.entries.length}}" class="billing-empty">暂无请款记录</view>
+        <view
+          wx:for="{{activeRequested.entries}}"
+          wx:key="key"
+          wx:for-item="entry"
+          class="sales-detail-row"
+        >
+          <view class="sd-head">
+            <text class="sd-date">{{entry.date || '-'}}</text>
+            <text class="sd-code text-ellipsis">{{entry.target || '未关联单据'}}</text>
+            <text class="sd-amount">{{entry.amountText}}</text>
+          </view>
+          <view wx:if="{{entry.remark}}" class="sd-body"><text class="sd-quote">{{entry.remark}}</text></view>
+        </view>
+      </block>
+
+      <!-- 企业身份 -->
+      <block wx:elif="{{overlay==='company'}}">
+        <view class="identity-tip"><xicon name="warning" size="30" color="#3550d6" />填写发票抬头或企业常用全称，用于判断进销项发票与结算方向。</view>
+        <view class="field"><view class="field-label">单位名称</view><input class="field-input" cursor-spacing="24" value="{{companyDraft}}" placeholder="请输入企业全称" placeholder-class="composer-ph" bindinput="updateCompanyDraft" /></view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="saveCompany"><xicon name="check" size="30" color="#ffffff" />保存身份</view>
+      </block>
+
+      <!-- 每周对账提醒 -->
+      <block wx:elif="{{overlay==='reminder'}}">
+        <view class="identity-tip"><xicon name="clock" size="30" color="#3550d6" />开启后，系统会在每周设定时间推送对账单提醒（与 web 端设置互通）。</view>
+        <view class="field field-row">
+          <view class="field-label">开启提醒</view>
+          <switch checked="{{reminderDraft.enabled}}" color="#2f66f6" bindchange="toggleReminderEnabled" />
+        </view>
+        <view class="field field-row">
+          <view class="field-label">提醒时间</view>
+          <view class="reminder-pickers">
+            <picker mode="selector" range="{{weekdayOptions}}" value="{{reminderDraft.weekday - 1}}" disabled="{{!reminderDraft.enabled}}" bindchange="changeReminderWeekday">
+              <view class="picker-value">{{reminderDraft.enabled ? weekdayOptions[reminderDraft.weekday - 1] : '未设置'}}</view>
+            </picker>
+            <picker mode="time" value="{{reminderHourText}}" disabled="{{!reminderDraft.enabled}}" bindchange="changeReminderHour">
+              <view class="picker-value">{{reminderDraft.enabled ? reminderHourText : '--:--'}}</view>
+            </picker>
+          </view>
+        </view>
+        <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="closeOverlay">完成</view>
+      </block>
+
+      </view>
+      </scroll-view>
+
+      <!-- 底部固定操作栏：新建项目 / 新建批次 -->
+      <view wx:if="{{overlay==='context'}}" class="ctx-footer">
+        <view class="ctx-new-row">
+          <view class="ctx-new" hover-class="ctx-new-hover" bindtap="openCreateProject"><xicon name="plus" size="22" color="#2f66f6" stroke="{{2}}" />项目</view>
+          <view class="ctx-new ctx-new-batch" hover-class="ctx-new-hover" bindtap="openCreateBatchFromContext"><xicon name="plus" size="22" color="#ffffff" stroke="{{2}}" />批次</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

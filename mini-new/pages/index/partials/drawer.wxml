@@ -1,0 +1,98 @@
+<!-- 左侧抽屉：严格对齐参考设计 -->
+<view class="drawer-mask {{drawer ? 'is-open' : ''}}" bindtap="closeDrawer"></view>
+<view class="drawer {{drawer ? 'is-open' : ''}}" style="padding-top:{{safeTop + 12}}px;padding-bottom:{{safeBottom}}px">
+
+  <!-- 用户头部 -->
+  <view class="drawer-userhead" aria-role="button" aria-label="进入个人中心" bindtap="setTab" data-key="profile" hover-class="drawer-userhead-hover">
+    <view class="drawer-avatar">
+      <image wx:if="{{user && user.avatarUrl}}" class="drawer-avatar-img" src="{{user.avatarUrl}}" mode="aspectFill" />
+      <text wx:else>{{userInitial}}</text>
+    </view>
+    <view class="drawer-userhead-copy">
+      <view class="drawer-userhead-name text-ellipsis">
+        {{user ? (user.nickname || '微信用户') : '未登录'}}
+        <text wx:if="{{user && user.companyName}}" class="drawer-userhead-tag">默认企业</text>
+      </view>
+      <view class="drawer-userhead-company text-ellipsis">AI 项目对账平台</view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="drawer-scroll" enhanced show-scrollbar="{{false}}">
+
+    <view class="drawer-section-title">工作台</view>
+    <view class="drawer-nav">
+      <view
+        wx:for="{{navGroups.workbench}}"
+        wx:key="key"
+        class="drawer-card {{activeTab===item.key ? 'is-active' : ''}}"
+        data-key="{{item.key}}"
+        aria-role="button"
+        aria-label="{{item.label}}，{{item.desc}}"
+        bindtap="setTab"
+        hover-class="drawer-card-hover"
+        hover-stay-time="80"
+      >
+        <view class="drawer-card-icon tint-{{item.tone}}"><image class="drawer-card-icon-img" src="{{item.iconSrc}}" mode="aspectFit" /></view>
+        <view class="drawer-card-text">
+          <view class="drawer-card-label text-ellipsis">{{item.label}}</view>
+          <view class="drawer-card-desc text-ellipsis">{{item.desc}}</view>
+        </view>
+        <block wx:if="{{item.badge}}">
+          <view wx:if="{{item.badge==='已设'}}" class="drawer-card-status">已设</view>
+          <view wx:else class="drawer-card-badge badge-{{item.badgeTone}}">{{item.badge}}</view>
+        </block>
+        <xicon name="chevronRight" size="24" color="#c5c9d3" />
+      </view>
+    </view>
+
+    <view class="drawer-section-title">管理</view>
+    <view class="drawer-nav">
+      <view
+        wx:for="{{navGroups.manage}}"
+        wx:key="key"
+        class="drawer-card {{activeTab===item.key ? 'is-active' : ''}}"
+        data-key="{{item.key}}"
+        aria-role="button"
+        aria-label="{{item.label}}，{{item.desc}}"
+        bindtap="setTab"
+        hover-class="drawer-card-hover"
+        hover-stay-time="80"
+      >
+        <view class="drawer-card-icon tint-{{item.tone}}"><image class="drawer-card-icon-img" src="{{item.iconSrc}}" mode="aspectFit" /></view>
+        <view class="drawer-card-text">
+          <view class="drawer-card-label text-ellipsis">{{item.label}}</view>
+          <view class="drawer-card-desc text-ellipsis">{{item.desc}}</view>
+        </view>
+        <block wx:if="{{item.badge}}">
+          <view wx:if="{{item.badge==='已设'}}" class="drawer-card-status">已设</view>
+          <view wx:else class="drawer-card-badge badge-{{item.badgeTone}}">{{item.badge}}</view>
+        </block>
+        <xicon name="chevronRight" size="24" color="#c5c9d3" />
+      </view>
+    </view>
+
+
+  </scroll-view>
+
+  <!-- 底部：当前项目卡片 -->
+  <view class="drawer-foot">
+    <view class="drawer-projcard" aria-role="button" aria-label="切换当前项目与批次" bindtap="openContext" hover-class="drawer-projcard-hover">
+      <view class="drawer-projcard-icon tint-blue"><image class="drawer-projcard-icon-img" src="{{drawerIconSrc.building}}" mode="aspectFit" /></view>
+      <view class="drawer-projcard-copy">
+        <block wx:if="{{currentProject}}">
+          <view class="drawer-projcard-name text-ellipsis">{{currentProject.name}}</view>
+          <view class="drawer-projcard-tags">
+            <text class="drawer-projcard-tag">{{currentBatch.name}}</text>
+          </view>
+        </block>
+        <view wx:else class="drawer-projcard-name text-ellipsis">还没有业务项目</view>
+      </view>
+      <view class="drawer-projcard-btn" catchtap="openContext">
+        <image class="drawer-projcard-btn-ico" src="{{drawerIconSrc.switch}}" mode="aspectFit" />
+        <text>切换项目</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="drawer-foot-ver">衡账 · AI 项目对账平台 v 1.0.0</view>
+</view>

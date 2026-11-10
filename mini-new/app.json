@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/login/confirm"
+  ],
+  "window": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#f5f6f8",
+    "backgroundTextStyle": "dark",
+    "navigationBarTextStyle": "black"
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

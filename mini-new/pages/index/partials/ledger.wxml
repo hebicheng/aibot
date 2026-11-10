@@ -1,0 +1,396 @@
+<!-- 对账台账：5 格 KPI + 材料/运输筛选 + 按批次分组的明细表（表格 1:1 对标 web ReconciliationLedgerPage） -->
+<scroll-view
+  wx:if="{{activeTab==='ledger'}}"
+  class="page-scroll"
+  style="{{pageScrollStyle}}"
+  scroll-y
+  refresher-enabled
+  refresher-triggered="{{refreshing}}"
+  bindrefresherrefresh="refreshAll"
+>
+  <view class="page-inner">
+    <!-- KPI：9 项（采购侧 5 + 销售侧 4），两行五列布局（对齐 web ReconciliationLedgerPage） -->
+    <view class="ledger-kpis card ledger-kpis-grid">
+      <view class="ledger-kpi">
+        <view class="ledger-kpi-icon kpi-blue"><xicon name="cart" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">采购&运输</view>
+        <view class="ledger-kpi-val {{ledgerSummary.purchaseSize}}">{{ledgerSummary.purchaseText}}</view>
+      </view>
+      <view class="ledger-kpi">
+        <view class="ledger-kpi-icon kpi-purple"><xicon name="cash" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">请款总额</view>
+        <view class="ledger-kpi-val {{ledgerSummary.requestedSize}}">{{ledgerSummary.requestedText}}</view>
+      </view>
+      <view class="ledger-kpi ledger-kpi-green">
+        <view class="ledger-kpi-icon kpi-green"><xicon name="check" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">已付款</view>
+        <view class="ledger-kpi-val {{ledgerSummary.paidSize}}">{{ledgerSummary.paidText}}</view>
+      </view>
+      <view class="ledger-kpi ledger-kpi-red">
+        <view class="ledger-kpi-icon kpi-red"><xicon name="clock" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">未付款</view>
+        <view class="ledger-kpi-val {{ledgerSummary.unpaidSize}}">{{ledgerSummary.unpaidText}}</view>
+      </view>
+      <view class="ledger-kpi">
+        <view class="ledger-kpi-icon kpi-orange"><xicon name="invoice" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">进项票金额</view>
+        <view class="ledger-kpi-val {{ledgerSummary.invoiceSize}}">{{ledgerSummary.invoiceText}}</view>
+      </view>
+      <view class="ledger-kpi">
+        <view class="ledger-kpi-icon kpi-blue"><xicon name="truck" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">销售总金额</view>
+        <view class="ledger-kpi-val {{ledgerSummary.salesSize}}">{{ledgerSummary.salesText}}</view>
+      </view>
+      <view class="ledger-kpi ledger-kpi-green">
+        <view class="ledger-kpi-icon kpi-green"><xicon name="cash" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">已收款</view>
+        <view class="ledger-kpi-val {{ledgerSummary.receivedSize}}">{{ledgerSummary.receivedText}}</view>
+      </view>
+      <view class="ledger-kpi ledger-kpi-red">
+        <view class="ledger-kpi-icon kpi-red"><xicon name="clock" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">未回款</view>
+        <view class="ledger-kpi-val {{ledgerSummary.outstandingSize}}">{{ledgerSummary.outstandingText}}</view>
+      </view>
+      <view class="ledger-kpi ledger-kpi-green">
+        <view class="ledger-kpi-icon kpi-green"><xicon name="trend" size="24" color="#ffffff" stroke="{{2}}" /></view>
+        <view class="ledger-kpi-label">毛利</view>
+        <view class="ledger-kpi-val {{ledgerSummary.profitSize}}">{{ledgerSummary.profitText}}</view>
+      </view>
+    </view>
+
+    <!-- 类型筛选：全部 / 材料 / 运输 + 筛选图标 -->
+    <scroll-view class="filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="filter-row">
+        <view
+          wx:for="{{ledgerKinds}}"
+          wx:key="value"
+          class="filter-pill {{item.active ? 'is-active' : ''}}"
+          data-value="{{item.value}}"
+          bindtap="setLedgerKind"
+        >{{item.label}}</view>
+        <view class="filter-pill filter-pill-icon" bindtap="toggleLedgerAdvancedFilter" hover-class="filter-pill-hover">
+          <xicon name="filter" size="28" color="#54607a" stroke="{{2}}" />
+        </view>
+      </view>
+    </scroll-view>
+
+    <!-- 分组头部：共 X 个项目批次 + 展开全部 / 导出台账 -->
+    <view class="ledger-group-head">
+      <text class="ledger-group-count">共 <text class="ledger-group-count-num">{{displayedLedgerGroups.length}}</text> 个项目批次</text>
+      <view class="ledger-group-head-actions">
+        <view class="ledger-expand-all" bindtap="openReconExport" hover-class="ledger-expand-all-hover">
+          <xicon name="bill" size="22" color="#54607a" stroke="{{2}}" />
+          <text>导出对账单</text>
+        </view>
+        <view class="ledger-expand-all" bindtap="toggleAllLedgerGroups" hover-class="ledger-expand-all-hover">
+          <text>{{allExpanded ? '收起全部' : '展开全部'}}</text>
+          <xicon name="{{allExpanded ? 'chevronUp' : 'chevronDown'}}" size="22" color="#54607a" stroke="{{2}}" />
+        </view>
+        <view class="ledger-export-btn" bindtap="exportLedger" hover-class="ledger-export-btn-hover">
+          <xicon name="download" size="24" color="#ffffff" stroke="{{2}}" />
+          <text class="ledger-export-btn-text">导出台账</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 批次分组卡片列表 -->
+    <view wx:if="{{displayedLedgerGroups.length}}" class="ledger-groups">
+      <view
+        wx:for="{{displayedLedgerGroups}}"
+        wx:key="id"
+        wx:for-item="group"
+        class="ledger-group-card fade-in"
+      >
+        <!-- 组头：项目 · 批次 + 日期/行数 + 状态徽标 + 折叠箭头 -->
+        <view class="ledger-group-card-head" bindtap="toggleLedgerGroup" data-id="{{group.id}}" hover-class="ledger-group-card-head-hover">
+          <view class="ledger-group-card-title-wrap">
+            <view class="ledger-group-card-title text-ellipsis">{{group.projectName}} · {{group.batchName}}</view>
+            <view class="ledger-group-card-sub">{{group.dateText}} · {{group.rows.length}} 项明细</view>
+          </view>
+          <view class="ledger-group-card-side">
+            <view wx:if="{{group.statusLabel}}" class="badge tint-{{group.statusTone}}">
+              <view class="badge-dot"></view>{{group.statusLabel}}
+            </view>
+            <view class="ledger-group-card-chevron {{expandedGroupIds[group.id] ? 'is-open' : ''}}">
+              <xicon name="chevronDown" size="26" color="#8a96a8" stroke="{{2}}" />
+            </view>
+          </view>
+        </view>
+
+        <!-- 表格区（展开时显示）— 横向滚动，1:1 对标 web ReconciliationLedgerPage 全部 30 列 -->
+        <view wx:if="{{expandedGroupIds[group.id] || allExpanded}}" class="ledger-group-table-wrap">
+          <scroll-view class="ledger-table-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+            <view class="ledger-tbl">
+              <!-- 表头三行：优先用后端 LedgerTableSchema 动态渲染，未加载时回退本地硬编码 -->
+              <block wx:if="{{ledgerHeaderRows}}">
+                <view class="ledger-tr ledger-tr-group" style="grid-template-columns:{{ledgerColTemplate}}">
+                  <view wx:for="{{ledgerHeaderRows.row1}}" wx:key="idx" wx:for-item="cell" class="ledger-th-group {{cell.cls}}" style="grid-column: span {{cell.colSpan}}">{{cell.label}}</view>
+                </view>
+                <view class="ledger-tr" style="grid-template-columns:{{ledgerColTemplate}}">
+                  <view wx:for="{{ledgerHeaderRows.row2}}" wx:key="idx" wx:for-item="cell" class="ledger-th {{cell.cls}}" style="grid-column: span {{cell.colSpan}}">{{cell.label}}</view>
+                </view>
+                <view class="ledger-tr ledger-tr-leaf" style="grid-template-columns:{{ledgerColTemplate}}">
+                  <view wx:for="{{ledgerHeaderRows.row3}}" wx:key="idx" wx:for-item="cell" class="ledger-th {{cell.cls}}" style="grid-column: span {{cell.colSpan}}">{{cell.label}}</view>
+                </view>
+              </block>
+              <block wx:else>
+              <!-- 表头第 1 行：列组（宽度 = 对应子列宽度之和，保证与数据行逐列对齐） -->
+              <view class="ledger-tr ledger-tr-group" style="grid-template-columns:{{ledgerColTemplate}}">
+                <view class="ledger-th-group ledger-grp-ctx" style="grid-column: span 2">项目与批次</view>
+                <view class="ledger-th-group ledger-grp-cat" style="grid-column: span 1">业务分类</view>
+                <view class="ledger-th-group ledger-grp-mat" style="grid-column: span 8">材料采购 / 运输费用 / 实际送达</view>
+                <view class="ledger-th-group ledger-grp-req" style="grid-column: span 1">请款</view>
+                <view class="ledger-th-group ledger-grp-pay" style="grid-column: span 3">付款记录</view>
+                <view class="ledger-th-group ledger-grp-inv" style="grid-column: span 3">进项发票</view>
+                <view class="ledger-th-group ledger-grp-sal" style="grid-column: span 13">销售与收款</view>
+                <view class="ledger-th-group ledger-grp-sts" style="grid-column: span 1"></view>
+                <view class="ledger-th-group ledger-grp-act" style="grid-column: span 1"></view>
+              </view>
+              <!-- 表头第 2 行：子列头（状态/操作在此纵向居中，模拟 web rowspan=3） -->
+              <view class="ledger-tr" style="grid-template-columns:{{ledgerColTemplate}}">
+                <view class="ledger-th ledger-w-prj th-ctx">项目</view>
+                <view class="ledger-th ledger-w-bat th-ctx">批次</view>
+                <view class="ledger-th ledger-w-cat th-ctx">分类</view>
+                <view class="ledger-th ledger-w-mname th-mat">材料 / 费用</view>
+                <view class="ledger-th ledger-w-mspec th-mat">规格 / 单号</view>
+                <view class="ledger-th ledger-w-msupp th-mat">供应商 / 承运单位</view>
+                <view class="ledger-th ledger-w-mamt th-mat">采购 / 运输金额</view>
+                <view class="ledger-th ledger-w-msqty th-mat">采购单数量</view>
+                <view class="ledger-th ledger-w-mdel th-mat">送货单数量</view>
+                <view class="ledger-th ledger-w-msts th-mat">送达状态</view>
+                <view class="ledger-th ledger-w-mtot th-mat">总额</view>
+                <view class="ledger-th ledger-w-req th-req">请款金额</view>
+                <view class="ledger-th ledger-w-pdate th-pay">付款日期</view>
+                <view class="ledger-th ledger-w-ppay th-pay">收款单位</view>
+                <view class="ledger-th ledger-w-pamt th-pay">付款金额</view>
+                <view class="ledger-th ledger-w-idate th-inv">开票日期</view>
+                <view class="ledger-th ledger-w-iamt th-inv">开票金额</view>
+                <view class="ledger-th ledger-w-itax th-inv">税率</view>
+                <view class="ledger-th ledger-w-sord th-sal">销售订单号</view>
+                <view class="ledger-th ledger-w-samt th-sal">销售总金额</view>
+                <view class="ledger-th ledger-w-s-sub th-s-sub" style="grid-column: span 3">开票</view>
+                <view class="ledger-th ledger-w-s-sub th-s-sub" style="grid-column: span 2">收款</view>
+                <view class="ledger-th ledger-w-srdt th-sal">到款日期</view>
+                <view class="ledger-th ledger-w-sreq th-sal">要求回款日期</view>
+                <view class="ledger-th ledger-w-sint th-sal">月结利息</view>
+                <view class="ledger-th ledger-w-sprf th-sal">毛利</view>
+                <view class="ledger-th ledger-w-smrg th-sal">毛利率</view>
+                <view class="ledger-th ledger-w-spm th-sal">项目经理</view>
+                <view class="ledger-th ledger-w-sts th-sticky">状态</view>
+                <view class="ledger-th ledger-w-act th-sticky">操作</view>
+              </view>
+              <!-- 表头第 3 行：销项子列（33 列，与数据行 1:1 宽度） -->
+              <view class="ledger-tr ledger-tr-leaf" style="grid-template-columns:{{ledgerColTemplate}}">
+                <view class="ledger-th ledger-w-empty th-ctx"></view>
+                <view class="ledger-th ledger-w-empty th-ctx"></view>
+                <view class="ledger-th ledger-w-empty th-ctx"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-mat"></view>
+                <view class="ledger-th ledger-w-empty th-req"></view>
+                <view class="ledger-th ledger-w-empty th-pay"></view>
+                <view class="ledger-th ledger-w-empty th-pay"></view>
+                <view class="ledger-th ledger-w-empty th-pay"></view>
+                <view class="ledger-th ledger-w-empty th-inv"></view>
+                <view class="ledger-th ledger-w-empty th-inv"></view>
+                <view class="ledger-th ledger-w-empty th-inv"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-sinvdt th-leaf">开票日期</view>
+                <view class="ledger-th ledger-w-sinvam th-leaf">开票金额</view>
+                <view class="ledger-th ledger-w-sinvtax th-leaf">税率</view>
+                <view class="ledger-th ledger-w-srecam th-leaf">已收款金额</view>
+                <view class="ledger-th ledger-w-sout th-leaf">未回款金额</view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sal"></view>
+                <view class="ledger-th ledger-w-empty th-sticky"></view>
+                <view class="ledger-th ledger-w-empty th-sticky"></view>
+              </view>
+              </block>
+
+              <!-- 数据行：项目/批次/销售列整组纵向合并，材料财务列在材料区间合并，运输按行展示 -->
+              <view
+                wx:for="{{group.rows}}"
+                wx:for-item="row"
+                wx:for-index="ri"
+                wx:key="key"
+                class="ledger-tr ledger-data-row {{row.kind === 'transport' ? 'is-transport' : ''}}"
+                style="grid-template-columns:{{ledgerColTemplate}}"
+              >
+                <view class="ledger-td ledger-w-prj ledger-td-plain {{row.isLastRow ? '' : 'td-nb'}}">
+                  <view wx:if="{{ri === 0}}" class="ledger-td-text text-ellipsis">{{group.projectName}}</view>
+                </view>
+                <view class="ledger-td ledger-w-bat ledger-td-plain {{row.isLastRow ? '' : 'td-nb'}}">
+                  <view wx:if="{{ri === 0}}" class="ledger-td-strong text-ellipsis">{{group.batchName}}</view>
+                  <view wx:if="{{ri === 0}}" class="ledger-td-sub">{{group.dateText}}</view>
+                </view>
+                <view class="ledger-td ledger-w-cat {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}">
+                  <view class="ledger-kind-badge tint-{{row.kindTone === 'orange' ? 'orange' : 'blue'}}">
+                    <xicon name="{{row.kind === 'material' ? 'doc' : 'truck'}}" size="20" color="currentColor" />
+                    <text>{{row.kindLabel}}</text>
+                  </view>
+                </view>
+                <view class="ledger-td ledger-w-mname {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-strong text-ellipsis">{{row.material}}</view></view>
+                <view class="ledger-td ledger-w-mspec {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-text text-ellipsis">{{row.spec}}</view></view>
+                <view class="ledger-td ledger-w-msupp {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-text text-ellipsis">{{row.supplier || '-'}}</view></view>
+                <view class="ledger-td ledger-w-mamt {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-strong">{{row.purchaseAmountText}}</view></view>
+                <view class="ledger-td ledger-w-msqty {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-text">{{row.purchaseQuantityText || '-'}}</view></view>
+                <view class="ledger-td ledger-w-mdel {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-strong">{{row.deliveredText || '-'}}</view></view>
+                <view class="ledger-td ledger-w-msts {{row.kind === 'transport' ? 'ledger-td-transport' : ''}}"><view class="ledger-td-text">{{row.deliveryStatus || '-'}}</view></view>
+                <!-- 总额：材料采购 + 运输费用，跨全部行合并（模拟 web rowspan） -->
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-mtot ledger-td-plain {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-strong">{{group.totalAmountText}}</view></view>
+                <view wx:else class="ledger-td ledger-w-mtot ledger-td-plain td-nb"></view>
+
+                <!-- 请款金额：材料首行 → 材料区间合并，运输 → 按行，后续材料行 → 延续合并；点击展开笔次明细 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-req ledger-td-fin ledger-td-click {{row.isLastMaterial ? '' : 'td-nb'}}" catchtap="openRequestedDetail" data-batch-id="{{group.id}}" data-kind="material" data-batch-name="{{group.batchName}}">
+                  <view class="ledger-td-strong">{{row.requestedText}}</view>
+                  <view class="ledger-td-sub">ⓘ 明细</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-req ledger-td-fin ledger-td-click" catchtap="openRequestedDetail" data-batch-id="{{group.id}}" data-kind="transport" data-batch-name="{{group.batchName}}">
+                  <view class="ledger-td-strong">{{row.requestedText}}</view>
+                  <view class="ledger-td-sub">ⓘ 明细</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-req ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 付款日期 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-pdate ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-value">{{row.paymentDate || '-'}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-pdate ledger-td-fin">
+                  <view class="ledger-td-value">{{row.paymentDate || '-'}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-pdate ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 收款单位 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-ppay ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-text text-ellipsis">{{row.payee || '-'}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-ppay ledger-td-fin">
+                  <view class="ledger-td-text text-ellipsis">{{row.payee || '-'}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-ppay ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 付款金额 + 未付 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-pamt ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-strong {{row.paid > 0 ? 'green' : ''}}">{{row.paidText}}</view>
+                  <view wx:if="{{row.unpaid > 0}}" class="ledger-td-warn">未付 {{row.unpaidText}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-pamt ledger-td-fin">
+                  <view class="ledger-td-strong {{row.paid > 0 ? 'green' : ''}}">{{row.paidText}}</view>
+                  <view wx:if="{{row.unpaid > 0}}" class="ledger-td-warn">未付 {{row.unpaidText}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-pamt ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 进项开票日期 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-idate ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-value">{{row.invoiceDate || '-'}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-idate ledger-td-fin">
+                  <view class="ledger-td-value">{{row.invoiceDate || '-'}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-idate ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 进项开票金额 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-iamt ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-strong">{{row.invoiceText}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-iamt ledger-td-fin">
+                  <view class="ledger-td-strong">{{row.invoiceText}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-iamt ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 进项税率 -->
+                <view wx:if="{{ri === 0 && row.kind === 'material'}}" class="ledger-td ledger-w-itax ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}">
+                  <view class="ledger-td-value">{{row.taxRate || '-'}}</view>
+                </view>
+                <view wx:elif="{{row.kind === 'transport'}}" class="ledger-td ledger-w-itax ledger-td-fin">
+                  <view class="ledger-td-value">{{row.taxRate || '-'}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-itax ledger-td-fin {{row.isLastMaterial ? '' : 'td-nb'}}"></view>
+
+                <!-- 销售与回款列用 group 级数据，整组纵向合并（模拟 web rowspan） -->
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sord ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-text text-ellipsis">{{group.salesOrder || '-'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sord ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-samt ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-strong">{{group.salesText}}</view></view>
+                <view wx:else class="ledger-td ledger-w-samt ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sinvdt ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-value">{{group.salesInvoiceDate || '-'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sinvdt ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sinvam ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-strong">{{group.salesInvoiceAmountText || '¥0.00'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sinvam ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sinvtax ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-value">{{group.salesTaxRate}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sinvtax ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-srecam ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-strong {{group.received > 0 ? 'green' : ''}}">{{group.receivedText}}</view></view>
+                <view wx:else class="ledger-td ledger-w-srecam ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sout ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}">
+                  <view class="ledger-td-strong {{group.outstanding > 0 ? 'red' : ''}}">{{group.outstandingText}}</view>
+                  <view wx:if="{{group.isMonthlySettlement && group.interest > 0}}" class="ledger-td-sub">含息 {{group.dueTotalText}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-sout ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-srdt ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-value">{{group.receiptDate || '-'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-srdt ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sreq ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-value">{{group.requiredReceiptDate || '-'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sreq ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sint ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}">
+                  <block wx:if="{{group.isMonthlySettlement}}">
+                    <view class="ledger-td-strong {{group.interest > 0 ? 'orange' : ''}}">{{group.interestText}}</view>
+                    <view wx:if="{{group.interestDetails.length}}" class="ledger-td-sub ledger-td-detail" catchtap="showInterestDetail" data-id="{{group.id}}">ⓘ 计息明细</view>
+                    <view wx:if="{{group.overdueFlag || group.amountCapFlag}}" class="ledger-td-flag">超{{group.overdueFlag ? '3个月' : ''}}{{group.overdueFlag && group.amountCapFlag ? '·' : ''}}{{group.amountCapFlag ? '300万' : ''}}</view>
+                  </block>
+                  <view wx:else class="ledger-td-value">—</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-sint ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sprf ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-strong">{{group.profitText}}</view></view>
+                <view wx:else class="ledger-td ledger-w-sprf ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-smrg ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-value">{{group.marginText}}</view></view>
+                <view wx:else class="ledger-td ledger-w-smrg ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-spm ledger-td-recv {{row.isLastRow ? '' : 'td-nb'}}"><view class="ledger-td-text text-ellipsis">{{group.projectManager || '-'}}</view></view>
+                <view wx:else class="ledger-td ledger-w-spm ledger-td-recv td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-sts ledger-td-plain {{row.isLastRow ? '' : 'td-nb'}}">
+                  <view class="badge tint-{{group.statusTone}}"><view class="badge-dot"></view>{{group.statusLabel}}</view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-sts ledger-td-plain td-nb"></view>
+
+                <view wx:if="{{ri === 0}}" class="ledger-td ledger-w-act ledger-td-plain {{row.isLastRow ? '' : 'td-nb'}}">
+                  <view class="ledger-row-edit" catchtap="editLedgerRow" data-batch-id="{{group.id}}"><xicon name="edit" size="22" color="#315fbd" stroke="{{2}}" /><text>编辑</text></view>
+                </view>
+                <view wx:else class="ledger-td ledger-w-act ledger-td-plain td-nb"></view>
+              </view>
+            </view>
+          </scroll-view>
+          <view class="ledger-note">
+            <xicon class="ledger-note-icon" name="warning" size="30" color="#f28a3a" stroke="{{2}}" />
+            <view class="ledger-note-text">材料与运输的付款、进项发票分别归集；毛利和毛利率根据销售金额与采购、运输成本自动计算。</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:else class="empty">
+      <view class="empty-ico"><xicon name="records" size="56" color="#b4b9c6" /></view>
+      <view class="empty-title">当前还没有可生成台账的采购或运输数据</view>
+      <view class="empty-sub">确认采购单或运输费用后，系统会自动建立对应类目行。</view>
+    </view>
+  </view>
+</scroll-view>

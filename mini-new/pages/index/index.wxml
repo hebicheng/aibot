@@ -1,0 +1,49 @@
+<!-- 主页面外壳：自定义导航 + 抽屉 + 四个视图 + 浮层 -->
+<view class="app">
+
+  <!-- 顶部自定义导航栏 -->
+  <view class="nav" style="{{headerStyle}};padding-right:{{capsuleWidth}}px">
+    <view class="nav-btn" bindtap="toggleDrawer" hover-class="nav-btn-hover">
+      <xicon name="menu" size="44" color="#1a1c22" stroke="{{2}}" />
+    </view>
+    <view class="nav-title">
+      <view class="nav-title-main">{{pageMeta.title}}</view>
+      <view wx:if="{{activeTab==='profile'}}" class="nav-title-sub text-ellipsis">{{pageMeta.sub}}</view>
+      <view wx:else class="nav-title-sub nav-sub-tap text-ellipsis" bindtap="openContext" hover-class="nav-sub-tap-hover">
+        <text class="nav-sub-text text-ellipsis">{{currentProject.name}} · {{currentBatch.name}}</text>
+        <view class="nav-sub-caret"><xicon name="chevronDown" size="18" color="#9ba7ba" /></view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 抽屉导航（与 Web 企业侧栏同源，针对小程序触控适配） -->
+  <include src="partials/drawer.wxml" />
+
+  <!-- 内容区 -->
+  <block wx:if="{{loading}}">
+    <view class="center-state" style="top:{{navHeight}}px">
+      <view class="spin"></view>
+      <view class="center-tip">正在为你准备工作台…</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{bootstrapError}}">
+    <view class="center-state" style="top:{{navHeight}}px">
+      <view class="err-emoji">😿</view>
+      <view class="center-tip">{{bootstrapError}}</view>
+      <view class="btn btn-ghost err-retry" bindtap="bootstrap">重新加载</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <include src="partials/workspace.wxml" />
+    <include src="partials/projects.wxml" />
+    <include src="partials/data.wxml" />
+    <include src="partials/ledger.wxml" />
+    <include src="partials/market.wxml" />
+    <include src="partials/profile.wxml" />
+  </block>
+
+  <!-- 浮层集合 -->
+  <include src="partials/overlays.wxml" />
+</view>

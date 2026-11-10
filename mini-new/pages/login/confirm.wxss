@@ -1,0 +1,144 @@
+/* 扫码登录确认页：克制、居中、单卡片；custom 全屏，顶部状态栏占位 */
+page {
+  background: #f4f5f7;
+}
+
+.confirm-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f4f5f7;
+}
+
+/* 状态栏占位：高度 = 状态栏高度，填浅灰，避免顶部露黑边 */
+.confirm-statusbar {
+  width: 100%;
+  flex: 0 0 auto;
+  background: #f4f5f7;
+}
+
+/* 内容区：占满剩余高度并居中卡片 */
+.confirm-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48rpx;
+  box-sizing: border-box;
+}
+
+.confirm-card {
+  width: 100%;
+  max-width: 560rpx;
+  background: #fff;
+  border-radius: 28rpx;
+  padding: 64rpx 48rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 12rpx 40rpx rgba(18, 33, 61, 0.08);
+}
+
+.confirm-icon {
+  position: relative;
+  width: 128rpx;
+  height: 128rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 36rpx;
+}
+.confirm-icon-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #eef4ff;
+}
+.confirm-icon-mark {
+  position: relative;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: #2f66f6;
+  color: #fff;
+  font-size: 34rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #1a1c22;
+}
+.confirm-sub {
+  margin-top: 12rpx;
+  font-size: 25rpx;
+  color: #8a90a0;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.confirm-done {
+  margin-top: 40rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+.confirm-done-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #0f8f52;
+}
+.confirm-done-sub {
+  font-size: 24rpx;
+  color: #8a90a0;
+}
+
+.confirm-error {
+  margin-top: 32rpx;
+  padding: 18rpx 24rpx;
+  background: #fdeeee;
+  color: #d23a3a;
+  font-size: 24rpx;
+  border-radius: 14rpx;
+  text-align: center;
+}
+
+.confirm-btn {
+  margin-top: 48rpx;
+  width: 100%;
+  height: 88rpx;
+  border-radius: 20rpx;
+  background: #2f66f6;
+  color: #fff;
+  font-size: 29rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.confirm-btn.is-loading {
+  opacity: 0.65;
+}
+
+.confirm-tip {
+  margin-top: 20rpx;
+  font-size: 21rpx;
+  color: #b4b9c6;
+}
+
+/* 返回首页：描边次按钮，与主按钮同宽对齐 */
+.confirm-btn-ghost {
+  margin-top: 24rpx;
+  background: #fff;
+  color: #2f66f6;
+  border: 2rpx solid #c9d6ff;
+  font-weight: 600;
+}
+.confirm-btn-ghost:active {
+  background: #f3f7ff;
+}

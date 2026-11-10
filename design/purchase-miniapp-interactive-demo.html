@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI采购助手小程序交互Demo</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" onload="window.__lucideLoaded=true;window.refreshIcons&&window.refreshIcons()"></script>
+  <style>
+    :root{
+      --bg:#eef3f8;
+      --phone:#fff;
+      --page:#f6f8fc;
+      --card:#fff;
+      --line:#e2e8f0;
+      --line2:#eef2f7;
+      --text:#0f172a;
+      --sub:#64748b;
+      --muted:#94a3b8;
+      --blue:#1769ff;
+      --blue2:#0f5bea;
+      --blueSoft:#eaf2ff;
+      --green:#10b981;
+      --greenSoft:#e8faf2;
+      --orange:#f59e0b;
+      --orangeSoft:#fff7e8;
+      --red:#ef4444;
+      --redSoft:#fff0f0;
+      --purple:#7c3aed;
+      --shadow:0 20px 50px rgba(15,23,42,.16);
+      --shadow2:0 10px 24px rgba(15,23,42,.08);
+      --r:12px;
+      --r2:16px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif;
+      background:
+        radial-gradient(circle at 18% 0%,#ffffff 0,#eef6ff 34%,transparent 52%),
+        linear-gradient(135deg,#f8fbff 0%,#edf3fb 100%);
+      color:var(--text);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+    }
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .stage{
+      width:100vw;
+      height:100vh;
+      display:grid;
+      grid-template-columns:420px minmax(320px,520px);
+      gap:28px;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .brief{
+      max-width:420px;
+      align-self:center;
+    }
+    .brief h1{
+      margin:0 0 14px;
+      font-size:30px;
+      line-height:1.2;
+      letter-spacing:0;
+    }
+    .brief p{
+      margin:0 0 18px;
+      color:var(--sub);
+      line-height:1.75;
+      font-size:14px;
+    }
+    .brief-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+    .brief-card{
+      background:rgba(255,255,255,.72);
+      border:1px solid rgba(226,232,240,.9);
+      border-radius:12px;
+      padding:12px;
+      box-shadow:var(--shadow2);
+    }
+    .brief-card strong{display:block;font-size:18px;margin-bottom:4px}
+    .brief-card span{font-size:12px;color:var(--sub);line-height:1.5}
+    .phone{
+      width:430px;
+      height:min(920px, calc(100vh - 32px));
+      min-height:680px;
+      background:var(--phone);
+      border:1px solid #d9e2ef;
+      border-radius:34px;
+      overflow:hidden;
+      box-shadow:var(--shadow);
+      position:relative;
+    }
+    .statusbar{
+      height:32px;
+      display:flex;
+      align-items:end;
+      justify-content:space-between;
+      padding:0 22px 7px;
+      font-size:12px;
+      font-weight:700;
+      color:#111827;
+      background:#fff;
+    }
+    .system-icons{display:flex;align-items:center;gap:5px}
+    .signal{display:flex;align-items:end;gap:2px}
+    .signal i{display:block;width:3px;border-radius:2px;background:#111827}
+    .signal i:nth-child(1){height:5px}.signal i:nth-child(2){height:7px}.signal i:nth-child(3){height:9px}
+    .battery{width:20px;height:9px;border:1.5px solid #111827;border-radius:3px;position:relative}
+    .battery:before{content:"";position:absolute;left:2px;top:2px;width:13px;height:3px;border-radius:2px;background:#111827}
+    .battery:after{content:"";position:absolute;right:-4px;top:2px;width:2px;height:4px;border-radius:1px;background:#111827}
+    .topbar{
+      height:58px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 14px;
+      border-bottom:1px solid var(--line2);
+      background:rgba(255,255,255,.96);
+      position:relative;
+      z-index:5;
+    }
+    .topbar.chat{height:64px}
+    .icon-btn{
+      width:34px;
+      height:34px;
+      border-radius:10px;
+      border:1px solid transparent;
+      background:transparent;
+      color:#1f2937;
+      display:grid;
+      place-items:center;
+      flex:none;
+    }
+    .icon-btn:hover{background:#f1f5f9;border-color:var(--line)}
+    .fallback-icon{
+      width:1em;
+      height:1em;
+      display:inline-grid;
+      place-items:center;
+      font-size:.95em;
+      line-height:1;
+      font-style:normal;
+      flex:none;
+    }
+    body.icons-ready .fallback-icon{display:none}
+    .title-wrap{min-width:0;flex:1}
+    .page-title{font-weight:800;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .page-sub{font-size:11px;color:var(--sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .context-pills{
+      display:flex;
+      gap:5px;
+      min-width:0;
+      flex:1;
+    }
+    .context-btn{
+      max-width:130px;
+      height:28px;
+      padding:0 7px;
+      border:1px solid var(--line);
+      border-radius:8px;
+      background:#f9fbff;
+      color:#475569;
+      display:flex;
+      align-items:center;
+      gap:5px;
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .context-btn i{width:12px;height:12px;flex:none}
+    .context-btn span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+    .content{
+      height:calc(100% - 32px - 58px);
+      background:var(--page);
+      overflow:auto;
+      padding:14px 14px 18px;
+      scrollbar-width:none;
+    }
+    .content::-webkit-scrollbar{display:none}
+    .chat-content{
+      height:calc(100% - 32px - 64px - 72px);
+      padding:14px 14px 12px;
+      background:linear-gradient(180deg,#f8fbff 0%,#f3f6fb 100%);
+    }
+    .chat-input{
+      height:72px;
+      position:absolute;
+      left:0;right:0;bottom:0;
+      padding:8px 12px 12px;
+      background:rgba(255,255,255,.97);
+      border-top:1px solid var(--line2);
+      z-index:6;
+    }
+    .input-shell{
+      height:52px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:0 8px 0 12px;
+      box-shadow:0 4px 14px rgba(15,23,42,.05);
+    }
+    .input-shell input{
+      border:0;
+      outline:0;
+      min-width:0;
+      flex:1;
+      color:#111827;
+      font-size:14px;
+    }
+    .send-btn{
+      width:36px;height:36px;border-radius:12px;
+      border:0;background:var(--blue);color:#fff;
+      display:grid;place-items:center;
+    }
+    .chat-list{display:flex;flex-direction:column;gap:14px;padding-bottom:8px}
+    .msg{
+      display:flex;
+      align-items:flex-start;
+      gap:8px;
+      width:100%;
+    }
+    .msg.user{justify-content:flex-end}
+    .avatar{
+      width:32px;height:32px;border-radius:50%;
+      background:#fff;border:1px solid var(--line);
+      display:grid;place-items:center;
+      color:var(--blue);
+      flex:none;
+      box-shadow:0 4px 12px rgba(15,23,42,.08);
+      overflow:hidden;
+    }
+    .avatar.user-avatar{background:linear-gradient(135deg,#1769ff,#67a4ff);color:#fff}
+    .bubble{
+      max-width:326px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:11px 12px;
+      font-size:13px;
+      line-height:1.6;
+      box-shadow:0 7px 18px rgba(15,23,42,.06);
+    }
+    .msg.user .bubble{
+      background:var(--blue);
+      color:#fff;
+      border-color:var(--blue);
+      border-radius:14px 14px 4px 14px;
+      box-shadow:0 8px 18px rgba(23,105,255,.18);
+    }
+    .msg.ai .bubble{border-radius:14px 14px 14px 4px}
+    .file-chip{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px;
+      border-radius:10px;
+      background:rgba(255,255,255,.12);
+      margin-top:8px;
+      min-width:210px;
+    }
+    .file-thumb{
+      width:58px;height:48px;border-radius:8px;background:#fff;position:relative;overflow:hidden;flex:none;
+    }
+    .file-thumb:before,.file-thumb:after{content:"";position:absolute;left:8px;right:8px;height:4px;background:#b7c4d8;border-radius:4px}
+    .file-thumb:before{top:14px}.file-thumb:after{top:27px}
+    .ai-card{
+      width:326px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:14px;
+      box-shadow:0 8px 20px rgba(15,23,42,.08);
+      overflow:hidden;
+    }
+    .card-head{
+      padding:12px 12px 8px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      border-bottom:1px solid var(--line2);
+    }
+    .card-head strong{font-size:14px;display:flex;align-items:center;gap:7px}
+    .card-body{padding:12px}
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .badge.green{background:var(--greenSoft);color:#047857}
+    .badge.blue{background:var(--blueSoft);color:var(--blue)}
+    .badge.orange{background:var(--orangeSoft);color:#b45309}
+    .badge.red{background:var(--redSoft);color:#dc2626}
+    .badge.gray{background:#f1f5f9;color:#475569}
+    .mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+    .mini-field{
+      border:1px solid var(--line2);
+      background:#fbfdff;
+      border-radius:10px;
+      padding:8px;
+    }
+    .mini-field span{display:block;color:var(--sub);font-size:11px;margin-bottom:3px}
+    .mini-field strong{font-size:13px}
+    .data-table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+    }
+    .data-table th,.data-table td{
+      border-bottom:1px solid var(--line2);
+      padding:8px 4px;
+      text-align:left;
+      white-space:nowrap;
+    }
+    .data-table th{color:#64748b;font-weight:800;background:#fbfdff}
+    .data-table td:last-child,.data-table th:last-child{text-align:right}
+    .card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .btn{
+      height:34px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#fff;
+      color:#334155;
+      font-size:12px;
+      font-weight:800;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      min-width:76px;
+    }
+    .btn svg.lucide,.btn .fallback-icon{width:15px;height:15px;flex:none}
+    .btn-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+    .btn.green{background:var(--greenSoft);border-color:#bbf7d0;color:#047857}
+    .btn.orange{background:var(--orangeSoft);border-color:#fed7aa;color:#b45309}
+    .btn.danger{background:var(--redSoft);border-color:#fecaca;color:#dc2626}
+    .btn.ghost{background:#f8fafc}
+    .btn.block{width:100%}
+    .section-title{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin:4px 0 10px;
+    }
+    .section-title h2{margin:0;font-size:16px}
+    .section-title .sub{font-size:12px;color:var(--sub)}
+    .kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+    .kpi{
+      background:#fff;
+      border:1px solid var(--line2);
+      border-radius:12px;
+      padding:11px;
+      box-shadow:0 4px 14px rgba(15,23,42,.04);
+      min-width:0;
+    }
+    .kpi span{display:block;color:#64748b;font-size:11px;margin-bottom:5px;white-space:nowrap}
+    .kpi strong{
+      display:block;
+      font-size:17px;
+      line-height:1.1;
+      white-space:nowrap;
+      letter-spacing:0;
+    }
+    .kpi small{display:block;margin-top:6px;color:#16a34a;font-size:11px;white-space:nowrap}
+    .toolbar{display:flex;gap:8px;margin-bottom:12px}
+    .searchbox{
+      flex:1;height:36px;border:1px solid var(--line);border-radius:10px;background:#fff;
+      display:flex;align-items:center;gap:6px;padding:0 10px;color:#94a3b8;font-size:12px;
+    }
+    .searchbox input{border:0;outline:0;min-width:0;flex:1;background:transparent}
+    .project-card,.batch-card,.list-card{
+      background:#fff;
+      border:1px solid var(--line2);
+      border-radius:14px;
+      padding:12px;
+      margin-bottom:10px;
+      box-shadow:0 6px 16px rgba(15,23,42,.05);
+    }
+    .card-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .item-title{font-size:14px;font-weight:900;line-height:1.35}
+    .item-sub{font-size:11px;color:var(--sub);margin-top:4px}
+    .stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+    .stat span{display:block;font-size:10px;color:#64748b;white-space:nowrap}
+    .stat strong{font-size:12px;white-space:nowrap}
+    .progress{height:5px;background:#e8eef7;border-radius:999px;overflow:hidden}
+    .progress i{display:block;height:100%;background:var(--blue);border-radius:999px}
+    .subtabs,.seg{
+      display:flex;
+      gap:6px;
+      padding:4px;
+      background:#eef3f9;
+      border-radius:12px;
+      margin-bottom:12px;
+    }
+    .subtab,.seg button{
+      border:0;
+      background:transparent;
+      color:#64748b;
+      flex:1;
+      height:34px;
+      border-radius:9px;
+      font-size:12px;
+      font-weight:800;
+    }
+    .subtab.active,.seg button.active{
+      background:#fff;
+      color:var(--blue);
+      box-shadow:0 2px 6px rgba(15,23,42,.06);
+    }
+    .flow-item{
+      display:grid;
+      grid-template-columns:26px 1fr 72px;
+      gap:8px;
+      align-items:start;
+      padding:12px 0;
+      border-bottom:1px solid var(--line2);
+    }
+    .flow-item:last-child{border-bottom:0}
+    .flow-dot{
+      width:18px;height:18px;border-radius:50%;
+      display:grid;place-items:center;
+      margin-top:1px;
+      background:var(--green);
+      color:#fff;
+    }
+    .flow-dot.pending{background:#cbd5e1;color:#64748b}
+    .flow-dot.doing{background:var(--blue)}
+    .flow-item h3{margin:0;font-size:13px}
+    .flow-item p{margin:3px 0 0;color:var(--sub);font-size:11px;line-height:1.5}
+    .flow-actions{display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+    .link-btn{
+      border:0;background:transparent;color:var(--blue);font-size:11px;font-weight:800;padding:0;
+    }
+    .file-list,.record-list{display:flex;flex-direction:column;gap:8px}
+    .file-item,.record-item{
+      display:grid;
+      grid-template-columns:34px 1fr auto;
+      gap:8px;
+      align-items:center;
+      background:#fff;
+      border:1px solid var(--line2);
+      border-radius:12px;
+      padding:10px;
+    }
+    .file-ico{
+      width:34px;height:34px;border-radius:10px;background:var(--blueSoft);color:var(--blue);
+      display:grid;place-items:center;
+    }
+    .chart-card{
+      background:#fff;
+      border:1px solid var(--line2);
+      border-radius:14px;
+      padding:12px;
+      box-shadow:0 5px 14px rgba(15,23,42,.05);
+      margin-bottom:10px;
+    }
+    .chart-card h3{margin:0 0 10px;font-size:13px}
+    .bars{height:126px;display:flex;align-items:end;gap:10px;padding:8px 4px 0}
+    .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0}
+    .bar-box{width:100%;height:92px;display:flex;align-items:end;justify-content:center;background:#f8fafc;border-radius:8px;overflow:hidden}
+    .bar-fill{width:70%;border-radius:7px 7px 0 0;background:linear-gradient(180deg,#5ea0ff,#1769ff)}
+    .bar-col span{font-size:10px;color:#64748b;white-space:nowrap}
+    .donut-row{display:flex;align-items:center;gap:14px}
+    .donut{
+      width:104px;height:104px;border-radius:50%;
+      background:conic-gradient(#1769ff 0 42%,#10b981 42% 69%,#f59e0b 69% 87%,#cbd5e1 87% 100%);
+      position:relative;flex:none;
+    }
+    .donut:after{content:"";position:absolute;inset:23px;background:#fff;border-radius:50%}
+    .legend{display:flex;flex-direction:column;gap:7px;font-size:12px;color:#475569}
+    .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+    .profile-hero{
+      margin:-14px -14px 12px;
+      padding:22px 18px 18px;
+      min-height:154px;
+      background:linear-gradient(135deg,#1769ff 0%,#3991ff 74%,#82c7ff 100%);
+      color:#fff;
+      position:relative;
+      overflow:hidden;
+    }
+    .profile-hero:after{
+      content:"";
+      position:absolute;
+      right:-36px;bottom:-48px;
+      width:180px;height:150px;
+      border:1px solid rgba(255,255,255,.28);
+      border-radius:50%;
+      transform:rotate(-18deg);
+    }
+    .profile-main{position:relative;z-index:1;display:flex;align-items:center;gap:14px;margin-top:14px}
+    .face{
+      width:60px;height:60px;border-radius:50%;
+      background:#fff;color:var(--blue);display:grid;place-items:center;font-size:26px;font-weight:900;
+      border:3px solid rgba(255,255,255,.45);
+    }
+    .profile-main h2{margin:0;font-size:20px}
+    .profile-main p{margin:4px 0 0;font-size:12px;opacity:.92}
+    .menu-list{display:flex;flex-direction:column;background:#fff;border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin-bottom:12px}
+    .menu-item{
+      border:0;background:#fff;height:48px;display:grid;grid-template-columns:34px 1fr auto 16px;align-items:center;gap:8px;
+      padding:0 12px;border-bottom:1px solid var(--line2);text-align:left;color:#1e293b;
+    }
+    .menu-item:last-child{border-bottom:0}
+    .menu-icon{width:30px;height:30px;border-radius:10px;background:#f1f5f9;color:#475569;display:grid;place-items:center}
+    .menu-item strong{font-size:13px}
+    .menu-item span{font-size:12px;color:#94a3b8}
+    .side-panel{
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      z-index:20;
+    }
+    .drawer{
+      position:absolute;
+      left:-286px;top:0;bottom:0;width:286px;
+      background:#fff;
+      box-shadow:20px 0 40px rgba(15,23,42,.16);
+      transition:left .22s ease;
+      pointer-events:auto;
+      padding:42px 14px 14px;
+      display:flex;
+      flex-direction:column;
+    }
+    .side-panel.show{pointer-events:auto;background:rgba(15,23,42,.18)}
+    .side-panel.show .drawer{left:0}
+    .drawer h3{margin:0;font-size:17px}
+    .drawer-top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom:16px;
+    }
+    .drawer-top span{display:block;margin-top:3px;font-size:11px;color:#94a3b8}
+    .drawer-section-title{
+      margin:8px 2px 8px;
+      font-size:11px;
+      color:#94a3b8;
+      font-weight:800;
+    }
+    .drawer-nav{display:flex;flex-direction:column;gap:4px}
+    .drawer .navitem{
+      width:100%;height:44px;border:0;background:#fff;border-radius:12px;display:grid;grid-template-columns:30px 1fr 18px;align-items:center;gap:8px;
+      padding:0 10px;font-weight:800;color:#334155;text-align:left;
+    }
+    .drawer .navitem i{color:#64748b}
+    .drawer .navitem.active{background:var(--blueSoft);color:var(--blue)}
+    .drawer .navitem.active i{color:var(--blue)}
+    .drawer-context{
+      padding:10px;
+      border:1px solid #e6edf7;
+      border-radius:14px;
+      background:linear-gradient(180deg,#fbfdff 0%,#f7faff 100%);
+    }
+    .drawer-bottom{margin-top:auto}
+    .drawer-context .context-line{
+      display:grid;
+      grid-template-columns:18px 1fr auto;
+      align-items:center;
+      gap:6px;
+      min-height:28px;
+      font-size:12px;
+      color:#334155;
+    }
+    .drawer-context .context-line span{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      min-width:0;
+    }
+    .drawer-context .context-line button{
+      border:0;
+      background:transparent;
+      color:var(--blue);
+      font-size:11px;
+      font-weight:800;
+      padding:0;
+    }
+    .drawer-user{
+      margin-top:10px;
+      display:grid;
+      grid-template-columns:38px 1fr 18px;
+      gap:10px;
+      align-items:center;
+      border:1px solid var(--line2);
+      border-radius:14px;
+      background:#fff;
+      padding:10px;
+      color:#1e293b;
+      text-align:left;
+    }
+    .drawer-user-avatar{
+      width:38px;height:38px;border-radius:50%;
+      display:grid;place-items:center;
+      background:linear-gradient(135deg,#1769ff,#73b5ff);
+      color:#fff;
+      font-weight:900;
+    }
+    .drawer-user strong{display:block;font-size:13px}
+    .drawer-user span{display:block;font-size:11px;color:#94a3b8;margin-top:2px}
+    .context-card{
+      width:100%;
+      border:1px solid #e6edf7;
+      border-radius:14px;
+      background:linear-gradient(180deg,#fbfdff 0%,#f7faff 100%);
+      padding:10px;
+      display:grid;
+      grid-template-columns:34px 1fr 18px;
+      gap:10px;
+      align-items:center;
+      text-align:left;
+    }
+    .context-card strong{display:block;font-size:13px;line-height:1.35}
+    .context-card span{display:block;font-size:11px;color:#94a3b8;margin-top:2px}
+    .context-icon{
+      width:34px;height:34px;border-radius:10px;
+      display:grid;place-items:center;
+      background:#eef4ff;color:var(--blue);
+    }
+    .modal-layer{
+      position:absolute;
+      inset:0;
+      background:rgba(15,23,42,.28);
+      z-index:30;
+      display:none;
+      align-items:flex-end;
+      justify-content:center;
+    }
+    .modal-layer.show{display:flex}
+    .sheet{
+      width:100%;
+      max-height:78%;
+      background:#fff;
+      border-radius:20px 20px 0 0;
+      padding:14px;
+      box-shadow:0 -20px 40px rgba(15,23,42,.16);
+      overflow:auto;
+    }
+    .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .sheet-head h3{margin:0;font-size:16px}
+    .cascade-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-height:330px}
+    .cascade-col{min-width:0;display:flex;flex-direction:column;border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:#fff}
+    .cascade-col-head{padding:10px;border-bottom:1px solid var(--line2);background:#fbfdff}
+    .cascade-col-head strong{display:block;font-size:13px;margin-bottom:8px}
+    .cascade-search{height:32px;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;gap:6px;padding:0 8px;background:#fff;color:#94a3b8}
+    .cascade-search input{border:0;outline:0;min-width:0;flex:1;font-size:12px}
+    .cascade-list{padding:6px;overflow:auto;max-height:292px}
+    .cascade-item{width:100%;border:0;background:#fff;border-radius:10px;padding:9px 8px;display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;text-align:left;color:#1e293b}
+    .cascade-item strong{display:block;font-size:12px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cascade-item span{display:block;font-size:10px;color:#94a3b8;margin-top:2px}
+    .cascade-item.active{background:var(--blueSoft);color:var(--blue)}
+    .cascade-item.active span{color:#4f7fd8}
+    .load-more{width:100%;height:32px;border:0;border-radius:9px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:800;margin-top:4px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+    .field label{font-size:12px;color:#64748b;font-weight:800}
+    .field input,.field select,.field textarea{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:10px;
+      min-height:38px;
+      padding:8px 10px;
+      outline:0;
+      background:#fff;
+      color:#111827;
+    }
+    .field textarea{min-height:76px;resize:none}
+    .toast{
+      position:absolute;
+      left:50%;
+      bottom:92px;
+      transform:translateX(-50%) translateY(20px);
+      background:rgba(15,23,42,.9);
+      color:#fff;
+      min-width:180px;
+      max-width:320px;
+      padding:10px 13px;
+      border-radius:999px;
+      font-size:12px;
+      text-align:center;
+      z-index:50;
+      opacity:0;
+      pointer-events:none;
+      transition:.2s ease;
+    }
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    @media (max-width:980px){
+      body{overflow:auto;align-items:flex-start}
+      .stage{height:auto;min-height:100vh;grid-template-columns:1fr;padding:16px}
+      .brief{display:none}
+      .phone{width:min(430px,100vw - 32px);height:min(920px, calc(100vh - 32px));margin:auto}
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <aside class="brief">
+      <h1>AI采购助手小程序交互 Demo</h1>
+      <p>这是一个可点击的 HTML 小程序模拟器，不是静态设计图。你可以从聊天上传单据开始，体验项目/批次归集、供应商报价、市场价对比、供应商选择、流程跟踪、明细编辑、财务报表、个人中心等完整业务路径。</p>
+      <div class="brief-grid">
+        <div class="brief-card"><strong>3</strong><span>主入口：聊天、看板、我的</span></div>
+        <div class="brief-card"><strong>4</strong><span>批次详情 Tab 全部可点</span></div>
+        <div class="brief-card"><strong>6+</strong><span>聊天业务卡片与非业务识别</span></div>
+        <div class="brief-card"><strong>20+</strong><span>按钮、弹窗、编辑、删除、导出交互</span></div>
+      </div>
+    </aside>
+
+    <main class="phone" id="app">
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="system-icons"><span class="signal"><i></i><i></i><i></i></span><span>5G</span><span class="battery"></span></span>
+      </div>
+      <div id="topbar"></div>
+      <div id="content"></div>
+      <div id="bottom"></div>
+      <div class="side-panel" id="drawerLayer"></div>
+      <div class="modal-layer" id="modal"></div>
+      <div class="toast" id="toast"></div>
+    </main>
+  </div>
+
+  <script>
+    const fmt = new Intl.NumberFormat('zh-CN');
+    const state = {
+      page: 'chat',
+      previousPage: 'dashboard',
+      dashboardTab: 'projects',
+      batchTab: 'flow',
+      reportTab: 'project',
+      selectedProjectId: 'p1',
+      selectedBatchId: 'b1',
+      drawer: false,
+      modal: null,
+      modalData: {},
+      query: '',
+      contextSearch: '',
+      contextProjectLimit: 5,
+      messages: [
+        { from:'ai', type:'text', text:'你好！我是你的AI采购助手。请上传采购计划单、报价单、收款短信、付款短信，或直接告诉我采购需求，我会帮你识别、归集和生成记录。' },
+        { from:'user', type:'file', text:'这是本次的采购计划单', file:'采购计划单-2025-001.jpg' },
+        { id:'m_purchase_1', from:'ai', type:'purchaseCard', status:'pending' },
+        { from:'user', type:'file', text:'这是供应商的报价单', file:'供应商报价单.pdf' },
+        { id:'m_quote_1', from:'ai', type:'quoteCard', status:'pending' }
+      ],
+      projects: [
+        { id:'p1', name:'XX商业综合体项目', status:'进行中', purchase:1280, sales:1620, profit:340, margin:21.0, progress:68, updated:'2025-05-20' },
+        { id:'p2', name:'XX学校建设项目', status:'进行中', purchase:980, sales:1150, profit:170, margin:14.8, progress:45, updated:'2025-05-19' },
+        { id:'p3', name:'XX道路改造项目', status:'已完成', purchase:760, sales:950, profit:190, margin:20.0, progress:100, updated:'2025-05-18' },
+        { id:'p4', name:'华东仓储扩建项目', status:'进行中', purchase:620, sales:760, profit:140, margin:18.4, progress:52, updated:'2025-05-17' },
+        { id:'p5', name:'北区备件补货项目', status:'待报价', purchase:310, sales:390, profit:80, margin:20.5, progress:24, updated:'2025-05-16' },
+        { id:'p6', name:'南山园区弱电改造', status:'进行中', purchase:450, sales:535, profit:85, margin:15.9, progress:39, updated:'2025-05-15' },
+        { id:'p7', name:'苏州代工线二期', status:'已完成', purchase:890, sales:1080, profit:190, margin:17.6, progress:100, updated:'2025-05-12' },
+        { id:'p8', name:'深圳研发楼装修项目', status:'进行中', purchase:520, sales:650, profit:130, margin:20.0, progress:57, updated:'2025-05-10' },
+        { id:'p9', name:'成都门店升级项目', status:'待付款', purchase:280, sales:340, profit:60, margin:17.6, progress:71, updated:'2025-05-08' }
+      ],
+      batches: [
+        { id:'b1', projectId:'p1', name:'2025-001批次', status:'进行中', purchase:420, sales:520, profit:100, margin:19.2, progress:78 },
+        { id:'b2', projectId:'p1', name:'2025-002批次', status:'待报价', purchase:180, sales:235, profit:55, margin:23.4, progress:28 },
+        { id:'b3', projectId:'p2', name:'2025-006批次', status:'待付款', purchase:260, sales:315, profit:55, margin:17.5, progress:60 },
+        { id:'b4', projectId:'p3', name:'2025-003批次', status:'已完成', purchase:760, sales:950, profit:190, margin:20.0, progress:100 },
+        { id:'b5', projectId:'p4', name:'2025-011批次', status:'进行中', purchase:320, sales:390, profit:70, margin:17.9, progress:50 },
+        { id:'b6', projectId:'p5', name:'2025-014批次', status:'待报价', purchase:120, sales:155, profit:35, margin:22.6, progress:15 },
+        { id:'b7', projectId:'p6', name:'2025-021批次', status:'进行中', purchase:230, sales:275, profit:45, margin:16.4, progress:42 },
+        { id:'b8', projectId:'p7', name:'2025-031批次', status:'已完成', purchase:890, sales:1080, profit:190, margin:17.6, progress:100 },
+        { id:'b9', projectId:'p8', name:'2025-041批次', status:'进行中', purchase:270, sales:330, profit:60, margin:18.2, progress:56 },
+        { id:'b10', projectId:'p9', name:'2025-051批次', status:'待付款', purchase:280, sales:340, profit:60, margin:17.6, progress:71 }
+      ],
+      materials: [
+        { name:'铜筋', spec:'HRB400', unit:'吨', qty:50, budget:5600, supplier:'B建材贸易公司', quote:5620, market:5700 },
+        { name:'水泥', spec:'PO 42.5', unit:'吨', qty:100, budget:480, supplier:'B建材贸易公司', quote:462, market:470 },
+        { name:'沙子', spec:'中砂', unit:'吨', qty:200, budget:120, supplier:'C物资供应公司', quote:116, market:121 }
+      ],
+      suppliers: [
+        { name:'A钢材有限公司', quote:5800, diff:1.75, rating:3, pay:'月结30天', delivery:'5天', risk:'交期偏慢' },
+        { name:'B建材贸易公司', quote:5620, diff:-1.40, rating:5, pay:'月结45天', delivery:'3天', risk:'低风险' },
+        { name:'C物资供应公司', quote:5750, diff:0.88, rating:3, pay:'现款', delivery:'2天', risk:'账期较短' }
+      ],
+      flows: [
+        { id:'f1', title:'采购计划', time:'2025-05-01 09:30', status:'已完成', note:'识别采购计划单，录入3项物料', detail:'来源：聊天上传图片，AI置信度 96%' },
+        { id:'f2', title:'供应商报价', time:'2025-05-03 14:20', status:'已完成', note:'3家供应商报价已识别', detail:'已对比市场参考价 Mysteel 05-20' },
+        { id:'f3', title:'市场价格对比', time:'2025-05-03 14:28', status:'已完成', note:'铜筋市场价 5,700 元/吨', detail:'支持定时抓取和手动刷新' },
+        { id:'f4', title:'选择供应商', time:'2025-05-04 10:15', status:'已完成', note:'已选择：B建材贸易公司', detail:'价格优势 -1.40%，推荐指数5星' },
+        { id:'f5', title:'付款', time:'2025-05-05 15:30', status:'已完成', note:'付款 ¥420万', detail:'付款短信已识别并归档' },
+        { id:'f6', title:'收货验收', time:'2025-05-07 09:45', status:'已完成', note:'全部收货完成', detail:'验收单据已上传' },
+        { id:'f7', title:'客户回款', time:'2025-05-15 11:20', status:'进行中', note:'¥520万，已回款 ¥370万', detail:'待确认尾款 ¥150万' },
+        { id:'f8', title:'财务结算', time:'预计 2025-05-25', status:'待处理', note:'等待客户尾款到账', detail:'结算后自动生成项目利润归档' }
+      ],
+      financeRecords: [
+        { type:'付款', date:'2025-05-05', target:'B建材贸易公司', amount:420, status:'已完成' },
+        { type:'收款', date:'2025-05-15', target:'XX商业综合体甲方', amount:370, status:'部分到账' },
+        { type:'待收款', date:'2025-05-25', target:'XX商业综合体甲方', amount:150, status:'待处理' }
+      ],
+      files: [
+        { name:'采购计划单-2025-001.jpg', type:'图片', time:'2025-05-01 09:30' },
+        { name:'供应商报价单.pdf', type:'PDF', time:'2025-05-03 14:20' },
+        { name:'付款短信截图.png', type:'图片', time:'2025-05-05 15:31' },
+        { name:'验收单.docx', type:'文档', time:'2025-05-07 09:45' }
+      ]
+    };
+
+    function normalizeContext(){
+      if(!state.projects.find(p => p.id === state.selectedProjectId)){
+        state.selectedProjectId = state.projects[0]?.id;
+      }
+      const selectedBatch = state.batches.find(b => b.id === state.selectedBatchId);
+      if(!selectedBatch || selectedBatch.projectId !== state.selectedProjectId){
+        state.selectedBatchId = (state.batches.find(b => b.projectId === state.selectedProjectId) || state.batches[0])?.id;
+      }
+    }
+    function project(){ normalizeContext(); return state.projects.find(p => p.id === state.selectedProjectId) || state.projects[0]; }
+    function batch(){ normalizeContext(); return state.batches.find(b => b.id === state.selectedBatchId) || state.batches[0]; }
+    function money(v){ return `¥${fmt.format(v)}万`; }
+    const iconFallbacks = {
+      menu:'☰', 'chevron-down':'⌄', 'chevron-right':'›', 'chevron-left':'‹', x:'×',
+      folder:'□', package:'▣', 'folder-sync':'⇄', 'folder-input':'↳', 'package-open':'▤',
+      bell:'○', search:'⌕', check:'✓', 'check-circle':'✓', plus:'+',
+      lock:'锁',
+      bot:'AI', user:'人', 'user-round':'人', send:'➤', paperclip:'⌘', camera:'▢',
+      'layout-dashboard':'▦', 'chart-pie':'◔', 'sliders-horizontal':'≡', settings:'⚙',
+      download:'⇩', pencil:'✎', save:'✓', upload:'⇧', image:'▧', 'file-text':'文',
+      'file-spreadsheet':'表', 'message-square-text':'信', 'clipboard-check':'✓',
+      'bar-chart-3':'▥', eye:'◎', 'circle-check':'✓', 'refresh-cw':'↻',
+      'trending-up':'↗', archive:'▣', 'calendar-days':'日', 'building-2':'企',
+      'shield-check':'盾', database:'库', 'scroll-text':'志', 'circle-help':'?',
+      'log-out':'↩', 'credit-card':'卡', 'wallet-cards':'￥', 'file-type':'文',
+      'file-search':'查', 'message-circle-warning':'!', loader:'…', clock:'◷',
+      'list-checks':'☑', 'chart-no-axes-combined':'▥', 'folder-kanban':'▦'
+    };
+    function icon(name, size=18){
+      const fallback = iconFallbacks[name] || '•';
+      return `<i data-lucide="${name}" style="width:${size}px;height:${size}px"></i><span class="fallback-icon" style="font-size:${Math.max(10, Math.round(size * .72))}px">${fallback}</span>`;
+    }
+    function statusBadge(s){
+      const cls = s === '已完成' ? 'green' : s === '进行中' ? 'blue' : s.includes('待') ? 'orange' : 'gray';
+      return `<span class="badge ${cls}">${s}</span>`;
+    }
+    function currentContextSnapshot(){
+      return { projectId: project().id, projectName: project().name, batchId: batch().id, batchName: batch().name };
+    }
+    function messageContext(m){
+      const locked = ['archived','done'].includes(m.status);
+      return locked && m.context ? m.context : currentContextSnapshot();
+    }
+    function cardStatusText(m, pendingText='待确认'){
+      if(m.status === 'archived') return '已归档';
+      if(m.status === 'done') return '已完成';
+      return pendingText;
+    }
+    function lockHint(m){
+      if(!['archived','done'].includes(m.status)) return '';
+      return `<div class="item-sub" style="margin-top:8px;color:#64748b">${icon('lock',12)} 已锁定归档上下文，切换全局项目/批次不会改变此卡片</div>`;
+    }
+    function lockMessage(m, status='archived'){
+      m.status = status;
+      m.context = currentContextSnapshot();
+    }
+    function toast(text){
+      const el = document.getElementById('toast');
+      el.textContent = text;
+      el.classList.add('show');
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => el.classList.remove('show'), 1800);
+    }
+    function setPage(page){
+      if (state.page !== page) state.previousPage = state.page;
+      state.page = page;
+      state.drawer = false;
+      render();
+    }
+    function openPageFromMenu(page){
+      state.previousPage = ['batch','report'].includes(page) ? 'dashboard' : state.page;
+      state.page = page;
+      state.drawer = false;
+      render();
+    }
+    function backToPrevious(){
+      const fallback = ['batch','report'].includes(state.page) ? 'dashboard' : 'chat';
+      const target = state.previousPage && state.previousPage !== state.page ? state.previousPage : fallback;
+      state.page = target;
+      state.drawer = false;
+      render();
+    }
+    function openModal(type, data={}){
+      state.modal = type;
+      state.modalData = data;
+      renderModal();
+    }
+    function openContextPicker(){
+      state.contextSearch = '';
+      state.contextProjectLimit = 5;
+      openModal('contextPicker');
+    }
+    function selectContextProject(id){
+      state.selectedProjectId = id;
+      state.selectedBatchId = (state.batches.find(b => b.projectId === id) || state.batches[0])?.id;
+      renderModal();
+    }
+    function selectContextBatch(id){
+      state.selectedBatchId = id;
+      closeModal();
+      renderPreservingChatScroll();
+      toast(`已切换到 ${project().name} · ${batch().name}`);
+    }
+    function updateContextSearch(value){
+      state.contextSearch = value;
+      state.contextProjectLimit = 5;
+      renderModal();
+      setTimeout(() => {
+        const input = document.getElementById('contextSearchInput');
+        if(input){
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      }, 0);
+    }
+    function loadMoreContextProjects(){
+      state.contextProjectLimit += 5;
+      renderModal();
+    }
+    function closeModal(){
+      state.modal = null;
+      state.modalData = {};
+      renderModal();
+    }
+    function addAiText(text){
+      state.messages.push({ from:'ai', type:'text', text });
+      render();
+      scrollChatBottom();
+    }
+    function addUserText(text){
+      state.messages.push({ from:'user', type:'text', text });
+    }
+    function scrollChatBottom(){
+      setTimeout(() => {
+        const c = document.querySelector('.chat-content');
+        if(c) c.scrollTop = c.scrollHeight;
+      }, 0);
+    }
+    function renderPreservingChatScroll(){
+      const c = document.querySelector('.chat-content');
+      const top = c ? c.scrollTop : null;
+      render();
+      if(top !== null){
+        setTimeout(() => {
+          const next = document.querySelector('.chat-content');
+          if(next) next.scrollTop = top;
+        }, 0);
+      }
+    }
+    function refreshIcons(){
+      if(window.lucide){
+        lucide.createIcons();
+        document.body.classList.add('icons-ready');
+        cancelAnimationFrame(refreshIcons.raf);
+        refreshIcons.raf = requestAnimationFrame(() => {
+          lucide.createIcons();
+          document.body.classList.add('icons-ready');
+        });
+        return;
+      }
+      document.body.classList.remove('icons-ready');
+      clearTimeout(refreshIcons.timer);
+      refreshIcons.timer = setTimeout(refreshIcons, 80);
+    }
+    window.refreshIcons = refreshIcons;
+
+    function render(){
+      normalizeContext();
+      renderTopbar();
+      renderContent();
+      renderBottom();
+      renderDrawer();
+      renderModal();
+      refreshIcons();
+    }
+
+    function renderTopbar(){
+      const el = document.getElementById('topbar');
+      if(state.page === 'chat'){
+        el.innerHTML = `
+          <div class="topbar chat">
+            <button class="icon-btn" onclick="toggleDrawer()">${icon('menu')}</button>
+            <div class="context-pills">
+              <button class="context-btn" onclick="openContextPicker()" title="${project().name}">${icon('folder',12)}<span>${project().name}</span>${icon('chevron-down',12)}</button>
+              <button class="context-btn" onclick="openContextPicker()" title="${batch().name}">${icon('package',12)}<span>${batch().name}</span>${icon('chevron-down',12)}</button>
+            </div>
+            <button class="icon-btn" onclick="openModal('messages')">${icon('bell')}</button>
+          </div>`;
+      } else {
+        const titles = {
+          dashboard:['数据看板','项目、批次、历史记录与报表总览'],
+          batch:['批次详情', `${batch().name} · ${project().name}`],
+          report:['财务报表','批次 / 项目 / 综合多维分析'],
+          profile:['个人中心','账号、权限、通知与数据管理']
+        };
+        const [t,s] = titles[state.page] || ['页面',''];
+        const secondary = ['batch','report'].includes(state.page);
+        const topActions = {
+          dashboard: ['filter', 'sliders-horizontal'],
+          batch: ['editBatch', 'pencil'],
+          report: ['exportReport', 'download'],
+          profile: ['settings', 'settings']
+        };
+        const [actionModal, actionIcon] = topActions[state.page] || ['settings', 'more-horizontal'];
+        const actionCall = actionModal === 'exportReport' ? "toast('报表已生成，可导出 Excel / PDF')" : actionModal === 'editBatch' ? `openModal('editBatch',{id:'${state.selectedBatchId}'})` : `openModal('${actionModal}')`;
+        el.innerHTML = `
+          <div class="topbar">
+            <button class="icon-btn" onclick="${secondary ? 'backToPrevious()' : 'toggleDrawer()'}">${icon(secondary ? 'chevron-left' : 'menu')}</button>
+            <div class="title-wrap"><div class="page-title">${t}</div><div class="page-sub">${s}</div></div>
+            <button class="icon-btn" onclick="${actionCall}">${icon(actionIcon)}</button>
+          </div>`;
+      }
+    }
+
+    function renderBottom(){
+      const el = document.getElementById('bottom');
+      if(state.page === 'chat'){
+        el.innerHTML = `
+          <div class="chat-input">
+            <div class="input-shell">
+              <button class="icon-btn" onclick="openModal('upload')">${icon('paperclip')}</button>
+              <input id="chatText" placeholder="输入消息，或试试：付款短信 / 非业务问题" onkeydown="if(event.key==='Enter') sendChat()" />
+              <button class="icon-btn" onclick="openModal('upload')">${icon('camera')}</button>
+              <button class="send-btn" onclick="sendChat()">${icon('send',17)}</button>
+            </div>
+          </div>`;
+      } else {
+        el.innerHTML = '';
+      }
+    }
+
+    function renderContent(){
+      const el = document.getElementById('content');
+      if(state.page === 'chat') el.className = 'content chat-content';
+      else el.className = 'content';
+      const map = {
+        chat: renderChat,
+        dashboard: renderDashboard,
+        batch: renderBatch,
+        report: renderReport,
+        profile: renderProfile
+      };
+      el.innerHTML = map[state.page]();
+      refreshIcons();
+    }
+
+    function renderChat(){
+      return `<div class="chat-list">${state.messages.map(renderMessage).join('')}</div>`;
+    }
+    function renderMessage(m){
+      if(m.from === 'user'){
+        const body = m.type === 'file'
+          ? `${m.text}<div class="file-chip"><span class="file-thumb"></span><span>${m.file}</span></div>`
+          : m.text;
+        return `<div class="msg user"><div class="bubble">${body}</div><div class="avatar user-avatar">${icon('user',17)}</div></div>`;
+      }
+      if(m.type === 'purchaseCard') return `<div class="msg ai"><div class="avatar">${icon('bot',18)}</div>${purchaseCard(m)}</div>`;
+      if(m.type === 'quoteCard') return `<div class="msg ai"><div class="avatar">${icon('bot',18)}</div>${quoteCard(m)}</div>`;
+      if(m.type === 'paymentCard') return `<div class="msg ai"><div class="avatar">${icon('bot',18)}</div>${paymentCard(m)}</div>`;
+      if(m.type === 'marketCard') return `<div class="msg ai"><div class="avatar">${icon('bot',18)}</div>${marketCard(m)}</div>`;
+      return `<div class="msg ai"><div class="avatar">${icon('bot',18)}</div><div class="bubble">${m.text}</div></div>`;
+    }
+    function purchaseCard(m){
+      const ctx = messageContext(m);
+      const locked = ['archived','done'].includes(m.status);
+      return `<div class="ai-card">
+        <div class="card-head"><strong>${icon('clipboard-check',17)}识别到采购需求</strong>${statusBadge(cardStatusText(m,'待确认'))}</div>
+        <div class="card-body">
+          <div class="mini-grid">
+            <div class="mini-field"><span>项目</span><strong>${ctx.projectName}</strong></div>
+            <div class="mini-field"><span>批次</span><strong>${ctx.batchName}</strong></div>
+          </div>
+          <table class="data-table"><thead><tr><th>物料</th><th>规格</th><th>数量</th><th>预算</th><th>操作</th></tr></thead><tbody>
+            ${state.materials.map((x,i) => `<tr><td>${x.name}</td><td>${x.spec}</td><td>${x.qty}${x.unit}</td><td>¥${fmt.format(x.budget)}</td><td>${locked ? '<span class="item-sub">锁定</span>' : `<button class="link-btn" onclick="openModal('editMaterial',{index:${i}})">修改</button>`}</td></tr>`).join('')}
+          </tbody></table>
+          ${lockHint(m)}
+          ${locked ? '' : `<div class="card-actions"><button class="btn primary" onclick="confirmPurchase('${m.id}')">${icon('check',15)}确认录入</button></div>`}
+        </div>
+      </div>`;
+    }
+    function quoteCard(m){
+      const locked = ['archived','done'].includes(m.status);
+      return `<div class="ai-card">
+        <div class="card-head"><strong>${icon('bar-chart-3',17)}供应商报价对比</strong>${statusBadge(cardStatusText(m,'待决策'))}</div>
+        <div class="card-body">
+          <table class="data-table"><thead><tr><th>供应商</th><th>报价</th><th>价差</th><th>评级</th></tr></thead><tbody>
+            ${state.suppliers.map(s => `<tr><td>${s.name}</td><td>${fmt.format(s.quote)}</td><td style="color:${s.diff<0?'#059669':'#d97706'}">${s.diff>0?'+':''}${s.diff}%</td><td>${'★'.repeat(s.rating)}${'☆'.repeat(5-s.rating)}</td></tr>`).join('')}
+          </tbody></table>
+          <div class="item-sub" style="margin-top:8px">市场参考价：5,700 元/吨 · 数据源：Mysteel · 05-20</div>
+          ${lockHint(m)}
+          <div class="card-actions">
+            <button class="btn" onclick="openModal('supplierCompare')">${icon('eye',15)}查看详情</button>
+            ${locked ? '' : `<button class="btn primary" onclick="chooseSupplier('${m.id}')">${icon('circle-check',15)}选择供应商</button><button class="btn" onclick="refreshMarket()">${icon('refresh-cw',15)}重新分析</button>`}
+          </div>
+        </div>
+      </div>`;
+    }
+    function paymentCard(m){
+      const ctx = messageContext(m);
+      const locked = ['archived','done'].includes(m.status);
+      return `<div class="ai-card">
+        <div class="card-head"><strong>${icon('message-square-text',17)}识别到付款短信</strong>${statusBadge(cardStatusText(m,'待归档'))}</div>
+        <div class="card-body">
+          <div class="mini-grid">
+            <div class="mini-field"><span>付款对象</span><strong>B建材贸易公司</strong></div>
+            <div class="mini-field"><span>付款金额</span><strong>¥420万</strong></div>
+            <div class="mini-field"><span>付款时间</span><strong>2025-05-05</strong></div>
+            <div class="mini-field"><span>匹配批次</span><strong>${ctx.batchName}</strong></div>
+          </div>
+          ${lockHint(m)}
+          ${locked ? '' : `<div class="card-actions"><button class="btn primary" onclick="archivePayment('${m.id}')">${icon('archive',15)}确认归档</button><button class="btn" onclick="openModal('editFinance')">${icon('pencil',15)}修改金额</button></div>`}
+        </div>
+      </div>`;
+    }
+    function marketCard(){
+      return `<div class="ai-card">
+        <div class="card-head"><strong>${icon('trending-up',17)}市场价刷新完成</strong>${statusBadge('实时')}</div>
+        <div class="card-body">
+          <div class="mini-grid">
+            <div class="mini-field"><span>铜筋 HRB400</span><strong>¥5,700/吨</strong></div>
+            <div class="mini-field"><span>B供应商报价</span><strong style="color:#059669">低 1.40%</strong></div>
+            <div class="mini-field"><span>数据源</span><strong>Mysteel</strong></div>
+            <div class="mini-field"><span>更新</span><strong>刚刚</strong></div>
+          </div>
+          <div class="card-actions">
+            <button class="btn primary" onclick="setPage('report')">${icon('chart-pie',15)}看报表</button>
+            <button class="btn" onclick="openModal('marketSettings')">${icon('settings',15)}抓取设置</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function renderDashboard(){
+      const total = state.projects.reduce((a,p)=>({purchase:a.purchase+p.purchase,sales:a.sales+p.sales,profit:a.profit+p.profit}),{purchase:0,sales:0,profit:0});
+      return `
+        <div class="toolbar">
+          <div class="searchbox">${icon('search',16)}<input placeholder="搜索项目 / 批次 / 供应商" value="${state.query}" oninput="state.query=this.value;renderContent()" /></div>
+          <button class="btn primary" onclick="openModal('newProject')">${icon('plus',15)}新建</button>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi"><span>项目总数</span><strong>${state.projects.length}个</strong><small>进行中 2个</small></div>
+          <div class="kpi"><span>采购总额</span><strong>${money(total.purchase)}</strong><small style="color:#d97706">较上月 +12.5%</small></div>
+          <div class="kpi"><span>销售总额</span><strong>${money(total.sales)}</strong><small>较上月 +8.3%</small></div>
+          <div class="kpi"><span>毛利润</span><strong>${money(total.profit)}</strong><small>毛利率 18.1%</small></div>
+        </div>
+        <div class="subtabs">
+          ${['projects','batches','history','reports'].map((t,i)=>`<button class="subtab ${state.dashboardTab===t?'active':''}" onclick="state.dashboardTab='${t}';renderContent()">${['项目','批次','历史','报表'][i]}</button>`).join('')}
+        </div>
+        ${renderDashboardTab()}
+      `;
+    }
+    function renderDashboardTab(){
+      if(state.dashboardTab === 'projects'){
+        return `<div class="section-title"><h2>项目列表</h2><button class="link-btn" onclick="openModal('newProject')">+ 新建项目</button></div>
+        ${state.projects.filter(p=>!state.query || p.name.includes(state.query)).map(p => `
+          <div class="project-card" onclick="state.selectedProjectId='${p.id}';state.selectedBatchId=(state.batches.find(b=>b.projectId==='${p.id}')||state.batches[0]).id;setPage('batch')">
+            <div class="card-row"><div><div class="item-title">${p.name}</div><div class="item-sub">最后更新：${p.updated}</div></div>${statusBadge(p.status)}</div>
+            <div class="stat-row"><div class="stat"><span>采购金额</span><strong>${money(p.purchase)}</strong></div><div class="stat"><span>销售金额</span><strong>${money(p.sales)}</strong></div><div class="stat"><span>毛利润</span><strong>${money(p.profit)}</strong></div><div class="stat"><span>毛利率</span><strong>${p.margin}%</strong></div></div>
+            <div class="card-row"><span class="item-sub">进度：${p.progress}%</span><span class="item-sub">批次：${state.batches.filter(b=>b.projectId===p.id).length}个</span></div><div class="progress"><i style="width:${p.progress}%"></i></div>
+          </div>`).join('')}`;
+      }
+      if(state.dashboardTab === 'batches'){
+        return `<div class="section-title"><h2>批次列表</h2><button class="link-btn" onclick="openModal('newBatch')">+ 新建批次</button></div>
+        ${state.batches.map(b => `
+          <div class="batch-card">
+            <div class="card-row"><div><div class="item-title">${b.name}</div><div class="item-sub">${state.projects.find(p=>p.id===b.projectId).name}</div></div>${statusBadge(b.status)}</div>
+            <div class="stat-row"><div class="stat"><span>采购</span><strong>${money(b.purchase)}</strong></div><div class="stat"><span>销售</span><strong>${money(b.sales)}</strong></div><div class="stat"><span>利润</span><strong>${money(b.profit)}</strong></div><div class="stat"><span>进度</span><strong>${b.progress}%</strong></div></div>
+            <div class="card-actions"><button class="btn primary" onclick="state.selectedProjectId='${b.projectId}';state.selectedBatchId='${b.id}';setPage('batch')">查看详情</button><button class="btn" onclick="openModal('editBatch',{id:'${b.id}'})">编辑</button></div>
+          </div>`).join('')}`;
+      }
+      if(state.dashboardTab === 'history'){
+        return `<div class="section-title"><h2>对话与操作历史</h2><button class="link-btn" onclick="toast('已导出操作历史')">导出</button></div>
+        <div class="record-list">
+          ${['AI识别采购计划单并生成3项物料','用户确认录入采购需求','AI识别3家供应商报价','选择B建材贸易公司','付款短信归档到2025-001批次','编辑客户回款记录'].map((x,i)=>`
+          <div class="record-item"><div class="file-ico">${icon(['bot','check','scan-text','handshake','archive','pencil'][i],16)}</div><div><div class="item-title">${x}</div><div class="item-sub">2025-05-${String(i+1).padStart(2,'0')} 09:${30+i}</div></div><button class="link-btn" onclick="openModal('historyDetail',{text:'${x}'})">查看</button></div>`).join('')}
+        </div>`;
+      }
+      return `<div class="section-title"><h2>常用报表</h2><button class="link-btn" onclick="setPage('report')">进入报表中心</button></div>
+        <div class="chart-card"><h3>本月利润趋势</h3>${bars(['1月','2月','3月','4月','5月'],[40,62,50,80,68])}</div>
+        <div class="card-actions"><button class="btn primary block" onclick="setPage('report')">${icon('chart-no-axes-combined',16)}查看批次 / 项目 / 综合报表</button></div>`;
+    }
+
+    function renderBatch(){
+      const b = batch();
+      return `
+        <div class="card-row" style="margin-bottom:10px"><div><div class="item-title" style="font-size:20px">${b.name}</div><div class="item-sub">项目：${project().name}</div></div>${statusBadge(b.status)}</div>
+        <div class="kpi-grid">
+          <div class="kpi"><span>采购金额</span><strong>${money(b.purchase)}</strong></div>
+          <div class="kpi"><span>销售金额</span><strong>${money(b.sales)}</strong></div>
+          <div class="kpi"><span>毛利润</span><strong>${money(b.profit)}</strong></div>
+          <div class="kpi"><span>毛利率</span><strong>${b.margin}%</strong></div>
+        </div>
+        <div class="subtabs">
+          ${['flow','purchase','finance','files'].map((t,i)=>`<button class="subtab ${state.batchTab===t?'active':''}" onclick="state.batchTab='${t}';renderContent()">${['流程跟踪','采购明细','财务记录','相关文件'][i]}</button>`).join('')}
+        </div>
+        ${renderBatchTab()}
+      `;
+    }
+    function renderBatchTab(){
+      if(state.batchTab === 'flow'){
+        return `<div class="list-card">
+          ${state.flows.map(f => `
+            <div class="flow-item">
+              <div class="flow-dot ${f.status==='待处理'?'pending':f.status==='进行中'?'doing':''}">${f.status==='已完成'?icon('check',12):f.status==='进行中'?icon('loader',12):icon('clock',12)}</div>
+              <div><h3>${f.title}</h3><p>${f.time}<br>${f.note}</p></div>
+              <div class="flow-actions">${statusBadge(f.status)}<button class="link-btn" onclick="openModal('editFlow',{id:'${f.id}'})">修改</button></div>
+            </div>`).join('')}
+        </div>`;
+      }
+      if(state.batchTab === 'purchase'){
+        return `<div class="list-card">
+          <table class="data-table"><thead><tr><th>物料</th><th>供应商</th><th>报价</th><th>市场</th></tr></thead><tbody>
+          ${state.materials.map((m,i)=>`<tr onclick="openModal('editMaterial',{index:${i}})"><td>${m.name}</td><td>${m.supplier}</td><td>¥${fmt.format(m.quote)}</td><td>¥${fmt.format(m.market)}</td></tr>`).join('')}
+          </tbody></table>
+          <div class="card-actions"><button class="btn primary" onclick="openModal('editMaterial')">${icon('plus',15)}新增物料</button><button class="btn" onclick="refreshMarket()">${icon('refresh-cw',15)}刷新市场价</button></div>
+        </div>
+        <div class="chart-card"><h3>供应商价格优势</h3>${bars(state.suppliers.map(s=>s.name.slice(0,1)+'公司'),[45,82,60])}</div>`;
+      }
+      if(state.batchTab === 'finance'){
+        return `<div class="record-list">
+          ${state.financeRecords.map((r,i)=>`
+            <div class="record-item"><div class="file-ico">${icon(r.type.includes('收')?'wallet-cards':'credit-card',16)}</div><div><div class="item-title">${r.type} · ${money(r.amount)}</div><div class="item-sub">${r.date} · ${r.target}</div></div><button class="link-btn" onclick="openModal('editFinance',{index:${i}})">编辑</button></div>`).join('')}
+        </div>
+        <div class="card-actions"><button class="btn primary block" onclick="openModal('editFinance')">${icon('plus',15)}新增财务记录</button></div>`;
+      }
+      return `<div class="file-list">
+        ${state.files.map((f,i)=>`
+          <div class="file-item"><div class="file-ico">${icon(f.type==='PDF'?'file-text':f.type==='文档'?'file-type':'image',16)}</div><div><div class="item-title">${f.name}</div><div class="item-sub">${f.type} · ${f.time}</div></div><button class="link-btn" onclick="openModal('filePreview',{index:${i}})">预览</button></div>`).join('')}
+        <button class="btn primary block" onclick="openModal('upload')">${icon('upload',15)}上传相关文件</button>
+      </div>`;
+    }
+
+    function renderReport(){
+      return `
+        <div class="seg">
+          ${['batch','project','all'].map((t,i)=>`<button class="${state.reportTab===t?'active':''}" onclick="state.reportTab='${t}';renderContent()">${['批次报表','项目报表','综合报表'][i]}</button>`).join('')}
+        </div>
+        <div class="toolbar">
+          <button class="btn ghost" onclick="openModal('filter')">${icon('calendar-days',15)}<span class="btn-label">2025年1月-5月</span></button>
+          <button class="btn ghost" onclick="openContextPicker()">${icon('folder',15)}<span class="btn-label">${state.reportTab==='batch'?batch().name:project().name}</span></button>
+        </div>
+        ${renderReportTab()}
+      `;
+    }
+    function renderReportTab(){
+      const b = batch(), p = project();
+      const base = state.reportTab === 'batch' ? b : state.reportTab === 'project' ? p : { purchase:3020, sales:3720, profit:700, margin:18.8 };
+      return `
+        <div class="kpi-grid">
+          <div class="kpi"><span>采购金额</span><strong>${money(base.purchase)}</strong></div>
+          <div class="kpi"><span>销售金额</span><strong>${money(base.sales)}</strong></div>
+          <div class="kpi"><span>毛利润</span><strong>${money(base.profit)}</strong></div>
+          <div class="kpi"><span>毛利率</span><strong>${base.margin}%</strong></div>
+        </div>
+        <div class="chart-card"><h3>${state.reportTab==='batch'?'批次现金流':'利润趋势'}</h3>${bars(['1月','2月','3月','4月','5月'], state.reportTab==='batch'?[20,45,35,74,52]:[42,66,54,82,72])}</div>
+        <div class="chart-card"><h3>${state.reportTab==='all'?'项目利润分布':'成本结构'}</h3><div class="donut-row"><div class="donut"></div><div class="legend"><div><i style="background:#1769ff"></i>材料成本 42%</div><div><i style="background:#10b981"></i>利润 27%</div><div><i style="background:#f59e0b"></i>运输税费 18%</div><div><i style="background:#cbd5e1"></i>其他 13%</div></div></div></div>
+        <div class="list-card"><table class="data-table"><thead><tr><th>供应商</th><th>金额</th><th>准时率</th><th>次数</th></tr></thead><tbody>
+          <tr><td>B建材贸易公司</td><td>¥1,250万</td><td>98%</td><td>15</td></tr>
+          <tr><td>A钢材有限公司</td><td>¥980万</td><td>94%</td><td>11</td></tr>
+          <tr><td>C物资供应公司</td><td>¥760万</td><td>96%</td><td>9</td></tr>
+        </tbody></table></div>
+        <div class="card-actions"><button class="btn primary block" onclick="toast('报表已生成，可导出 Excel / PDF')">${icon('download',15)}<span class="btn-label">导出当前报表</span></button></div>
+      `;
+    }
+    function bars(labels, vals){
+      return `<div class="bars">${labels.map((l,i)=>`<div class="bar-col"><div class="bar-box"><div class="bar-fill" style="height:${vals[i]}%"></div></div><span>${l}</span></div>`).join('')}</div>`;
+    }
+
+    function renderProfile(){
+      return `
+        <div class="profile-hero">
+          <button class="icon-btn" style="color:#fff;float:right" onclick="openModal('settings')">${icon('settings')}</button>
+          <div class="profile-main"><div class="face">采</div><div><h2>张采购</h2><p>采购经理 · XX建材贸易有限公司</p><p>企业版 · 已开启数据审计</p></div></div>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi"><span>我的项目</span><strong>12个</strong></div>
+          <div class="kpi"><span>供应商库</span><strong>28家</strong></div>
+        </div>
+        <div class="menu-list">
+          ${[
+            ['folder-kanban','我的项目','12个','dashboard'],
+            ['building-2','供应商管理','28家','supplierManage'],
+            ['bell','消息中心','3条','messages'],
+            ['shield-check','权限管理','团队/角色','permissions'],
+            ['database','数据源设置','市场价抓取','marketSettings'],
+            ['scroll-text','操作日志','审计追踪','logs'],
+            ['circle-help','帮助与反馈','','help']
+          ].map(x=>{
+            const action = x[3] === 'dashboard' ? "setPage('dashboard')" : `openModal('${x[3]}')`;
+            return `<button class="menu-item" onclick="${action}"><div class="menu-icon">${icon(x[0],16)}</div><strong>${x[1]}</strong><span>${x[2]}</span>${icon('chevron-right',14)}</button>`;
+          }).join('')}
+        </div>
+        <button class="btn block" onclick="toast('演示模式无需退出登录')">${icon('log-out',15)}退出登录</button>
+      `;
+    }
+
+    function renderDrawer(){
+      const el = document.getElementById('drawerLayer');
+      el.className = `side-panel ${state.drawer ? 'show' : ''}`;
+      el.innerHTML = `<div class="drawer">
+        <div class="drawer-top">
+          <div>
+            <h3>AI采购助手</h3>
+            <span>采购流程工作台</span>
+          </div>
+          <button class="icon-btn" onclick="closeModal();state.drawer=false;renderDrawer()">${icon('x')}</button>
+        </div>
+        <div class="drawer-section-title">导航</div>
+        <div class="drawer-nav">
+        ${[
+          ['chat','bot','AI聊天'],
+          ['dashboard','layout-dashboard','数据看板'],
+          ['report','chart-pie','财务报表'],
+          ['profile','user-round','个人中心']
+        ].map(x=>`<button class="navitem ${state.page===x[0]?'active':''}" onclick="openPageFromMenu('${x[0]}')">${icon(x[1],17)}${x[2]}</button>`).join('')}
+        </div>
+        <div class="drawer-bottom">
+          <div class="drawer-section-title" style="margin-top:12px">当前上下文</div>
+          <button class="context-card" onclick="openContextPicker()">
+            <div class="context-icon">${icon('folder-sync',16)}</div>
+            <div><strong>${project().name}</strong><span>${batch().name}</span></div>
+            ${icon('chevron-right',16)}
+          </button>
+          <button class="drawer-user" onclick="openPageFromMenu('profile')">
+            <div class="drawer-user-avatar">采</div>
+            <div><strong>张采购</strong><span>采购经理 · 企业版</span></div>
+            <i data-lucide="chevron-right" style="width:16px;height:16px"></i>
+          </button>
+        </div>
+      </div>`;
+      el.onclick = e => { if(e.target === el){ state.drawer=false; renderDrawer(); } };
+      refreshIcons();
+    }
+    function toggleDrawer(){ state.drawer = !state.drawer; renderDrawer(); }
+
+    function renderModal(){
+      const el = document.getElementById('modal');
+      if(!state.modal){ el.className='modal-layer'; el.innerHTML=''; return; }
+      el.className='modal-layer show';
+      el.innerHTML = `<div class="sheet">${modalContent()}</div>`;
+      el.onclick = e => { if(e.target === el) closeModal(); };
+      refreshIcons();
+    }
+    function sheetHead(title){
+      return `<div class="sheet-head"><h3>${title}</h3><button class="icon-btn" onclick="closeModal()">${icon('x')}</button></div>`;
+    }
+    function renderContextPicker(){
+      const search = (state.contextSearch || '').trim().toLowerCase();
+      const filtered = state.projects.filter(p => !search || p.name.toLowerCase().includes(search) || p.status.toLowerCase().includes(search));
+      const visibleProjects = filtered.slice(0, state.contextProjectLimit);
+      const projectBatches = state.batches.filter(b => b.projectId === state.selectedProjectId);
+      return `${sheetHead('切换项目与批次')}
+        <div class="cascade-picker">
+          <div class="cascade-col">
+            <div class="cascade-col-head">
+              <strong>项目</strong>
+              <div class="cascade-search">${icon('search',14)}<input id="contextSearchInput" value="${state.contextSearch}" placeholder="搜索项目名称" oninput="updateContextSearch(this.value)" /></div>
+            </div>
+            <div class="cascade-list">
+              ${visibleProjects.map(p=>`<button class="cascade-item ${p.id===state.selectedProjectId?'active':''}" onclick="selectContextProject('${p.id}')"><div><strong>${p.name}</strong><span>${p.updated} · ${p.status}</span></div>${p.id===state.selectedProjectId?icon('check',14):''}</button>`).join('') || `<div class="item-sub" style="padding:12px">没有匹配项目</div>`}
+              ${visibleProjects.length < filtered.length ? `<button class="load-more" onclick="loadMoreContextProjects()">加载更多（${filtered.length - visibleProjects.length}）</button>` : ''}
+            </div>
+          </div>
+          <div class="cascade-col">
+            <div class="cascade-col-head"><strong>批次</strong><div class="item-sub">${project().name}</div></div>
+            <div class="cascade-list">
+              ${projectBatches.map(b=>`<button class="cascade-item ${b.id===state.selectedBatchId?'active':''}" onclick="selectContextBatch('${b.id}')"><div><strong>${b.name}</strong><span>${b.status} · 进度 ${b.progress}%</span></div>${b.id===state.selectedBatchId?icon('check',14):''}</button>`).join('') || `<div class="item-sub" style="padding:12px">该项目暂无批次</div>`}
+              <button class="load-more" onclick="openModal('newBatch')">新建批次</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-actions"><button class="btn" onclick="openModal('newProject')">${icon('plus',15)}新建项目</button></div>`;
+    }
+    function modalContent(){
+      const m = state.modal, d = state.modalData || {};
+      if(m === 'contextPicker' || m === 'projectPicker' || m === 'batchPicker') return renderContextPicker();
+      if(m === 'newProject') return `${sheetHead('新建项目')}
+        <div class="field"><label>项目名称</label><input id="newProjectName" value="新建采购项目" /></div>
+        <div class="field"><label>客户名称</label><input value="客户公司名称" /></div>
+        <button class="btn primary block" onclick="createProject()">${icon('check',15)}创建并切换</button>`;
+      if(m === 'newBatch') return `${sheetHead('新建批次')}
+        <div class="field"><label>批次名称</label><input id="newBatchName" value="2025-00${state.batches.length+1}批次" /></div>
+        <div class="field"><label>归属项目</label><select>${state.projects.map(p=>`<option ${p.id===state.selectedProjectId?'selected':''}>${p.name}</option>`).join('')}</select></div>
+        <button class="btn primary block" onclick="createBatch()">${icon('check',15)}创建并切换</button>`;
+      if(m === 'upload') return `${sheetHead('上传/模拟输入')}
+        <div class="card-actions">
+          <button class="btn primary block" onclick="simulateUpload('purchase')">${icon('image',15)}模拟采购计划单图片</button>
+          <button class="btn primary block" onclick="simulateUpload('quote')">${icon('file-text',15)}模拟供应商报价单</button>
+          <button class="btn primary block" onclick="simulateUpload('payment')">${icon('message-square-text',15)}模拟付款短信</button>
+        </div>`;
+      if(m === 'editBatch') {
+        const current = state.batches.find(x=>x.id===d.id) || batch();
+        return `${sheetHead('编辑批次')}
+          <div class="field"><label>批次名称</label><input value="${current.name}" /></div>
+          <div class="form-grid">
+            <div class="field"><label>状态</label><select><option>${current.status}</option><option>进行中</option><option>待报价</option><option>待付款</option><option>已完成</option></select></div>
+            <div class="field"><label>进度</label><input value="${current.progress}%" /></div>
+          </div>
+          <div class="field"><label>备注</label><textarea>当前批次用于采购计划、供应商报价、市场价对比、财务记录和文件归集。</textarea></div>
+          <button class="btn primary block" onclick="closeModal();toast('批次信息已保存')">${icon('save',15)}保存批次</button>`;
+      }
+      if(m === 'supplierCompare') return `${sheetHead('供应商报价详情')}
+        ${state.suppliers.map(s=>`<div class="project-card"><div class="card-row"><div><div class="item-title">${s.name}</div><div class="item-sub">账期：${s.pay} · 交期：${s.delivery}</div></div><span class="badge ${s.diff<0?'green':'orange'}">${s.diff>0?'+':''}${s.diff}%</span></div><div class="stat-row"><div class="stat"><span>报价</span><strong>¥${fmt.format(s.quote)}</strong></div><div class="stat"><span>评级</span><strong>${s.rating}星</strong></div><div class="stat"><span>风险</span><strong>${s.risk}</strong></div><div class="stat"><span>推荐</span><strong>${s.rating>=5?'高':'中'}</strong></div></div></div>`).join('')}
+        <button class="btn primary block" onclick="closeModal();toast('请在报价卡片中确认选择以完成归档')">${icon('circle-check',15)}返回报价卡片确认</button>`;
+      if(m === 'editMaterial') return `${sheetHead('编辑采购明细')}
+        <div class="form-grid"><div class="field"><label>物料名称</label><input value="${state.materials[d.index||0]?.name || ''}" /></div><div class="field"><label>规格型号</label><input value="${state.materials[d.index||0]?.spec || ''}" /></div><div class="field"><label>数量</label><input value="${state.materials[d.index||0]?.qty || ''}" /></div><div class="field"><label>报价</label><input value="${state.materials[d.index||0]?.quote || ''}" /></div></div>
+        <button class="btn primary block" onclick="closeModal();toast('采购明细已保存')">${icon('save',15)}保存</button>`;
+      if(m === 'editFlow') {
+        const f = state.flows.find(x=>x.id===d.id) || state.flows[0];
+        return `${sheetHead('修改流程节点')}
+          <div class="field"><label>节点名称</label><input value="${f.title}" /></div><div class="field"><label>状态</label><select><option>${f.status}</option><option>已完成</option><option>进行中</option><option>待处理</option></select></div><div class="field"><label>备注</label><textarea>${f.detail}</textarea></div>
+          <button class="btn primary block" onclick="closeModal();toast('流程节点已更新')">${icon('save',15)}保存修改</button>`;
+      }
+      if(m === 'editFinance') return `${sheetHead('编辑财务记录')}
+        <div class="form-grid"><div class="field"><label>类型</label><select><option>付款</option><option>收款</option><option>待收款</option></select></div><div class="field"><label>金额（万）</label><input value="${state.financeRecords[d.index||0]?.amount || 0}" /></div></div><div class="field"><label>对象</label><input value="${state.financeRecords[d.index||0]?.target || '往来单位'}" /></div>
+        <button class="btn primary block" onclick="closeModal();toast('财务记录已保存')">${icon('save',15)}保存</button>`;
+      if(m === 'filePreview') {
+        const f = state.files[d.index] || state.files[0];
+        return `${sheetHead('文件预览')}<div class="chart-card" style="height:220px;display:grid;place-items:center;text-align:center">${icon('file-search',42)}<div><div class="item-title">${f.name}</div><div class="item-sub">这里模拟文件预览、重命名、删除和重新识别</div></div></div><div class="card-actions"><button class="btn primary" onclick="closeModal();toast('文件已重新识别并生成记录')">重新识别</button><button class="btn" onclick="closeModal();toast('文件已重命名')">重命名</button><button class="btn danger" onclick="closeModal();toast('文件已删除')">删除</button></div>`;
+      }
+      if(['marketSettings','supplierManage','messages','permissions','logs','help','settings','filter','historyDetail'].includes(m)){
+        const title = {marketSettings:'市场数据源设置',supplierManage:'供应商管理',messages:'消息中心',permissions:'权限管理',logs:'操作日志',help:'帮助与反馈',settings:'账号设置',filter:'筛选条件',historyDetail:'历史详情'}[m];
+        return `${sheetHead(title)}
+          <div class="list-card"><div class="item-title">${d.text || title}</div><div class="item-sub" style="line-height:1.7;margin-top:8px">这是完整 App 中会触达的配置/管理页面演示。支持查看、编辑、启停、导出、消息已读、权限分配、审计追踪等操作。</div></div>
+          <div class="card-actions"><button class="btn primary block" onclick="closeModal();toast('${title}已保存')">${icon('check',15)}确认</button></div>`;
+      }
+      return `${sheetHead('操作')}<div class="list-card">功能演示</div>`;
+    }
+
+    function sendChat(){
+      const input = document.getElementById('chatText');
+      const text = (input?.value || '').trim();
+      if(!text) return;
+      addUserText(text);
+      if(/付款|短信|打款/.test(text)) state.messages.push({id:`m_payment_${Date.now()}`, from:'ai', type:'paymentCard', status:'pending'});
+      else if(/市场|大盘|价格/.test(text)) state.messages.push({id:`m_market_${Date.now()}`, from:'ai', type:'marketCard', status:'pending'});
+      else if(/天气|笑话|吃饭|你好玩/.test(text)) state.messages.push({from:'ai', type:'text', text:'这条内容看起来不是采购业务信息。我可以继续聊天，但不会把它归档到项目或批次。如果你要录入业务数据，请上传采购单、报价单、收付款短信或说明项目/批次。'});
+      else state.messages.push({from:'ai', type:'text', text:'我已收到。请确认这条信息是否归档到当前项目与批次，或点击顶部下拉切换归属。'});
+      input.value = '';
+      render();
+      scrollChatBottom();
+    }
+    function simulateUpload(type){
+      closeModal();
+      setPage('chat');
+      if(type === 'purchase'){ state.messages.push({from:'user',type:'file',text:'上传采购计划单',file:'采购计划单-模拟.jpg'},{id:`m_purchase_${Date.now()}`,from:'ai',type:'purchaseCard',status:'pending'}); }
+      if(type === 'quote'){ state.messages.push({from:'user',type:'file',text:'上传供应商报价单',file:'供应商报价单-模拟.pdf'},{id:`m_quote_${Date.now()}`,from:'ai',type:'quoteCard',status:'pending'}); }
+      if(type === 'payment'){ state.messages.push({from:'user',type:'text',text:'【银行短信】向B建材贸易公司付款420万元，交易成功。'},{id:`m_payment_${Date.now()}`,from:'ai',type:'paymentCard',status:'pending'}); }
+      render(); scrollChatBottom(); toast('已生成模拟识别结果');
+    }
+    function sendNonBusiness(){
+      closeModal();
+      setPage('chat');
+      state.messages.push({from:'user',type:'text',text:'今天中午吃什么？'},{from:'ai',type:'text',text:'这条内容看起来不是采购业务信息，不会进入项目/批次数据。你可以继续问我业务相关内容，例如上传采购计划、报价单、收款或付款凭证。'});
+      render(); scrollChatBottom();
+    }
+    function confirmPurchase(id){
+      const msg = state.messages.find(m => m.id === id);
+      if(msg) lockMessage(msg, 'archived');
+      state.messages.push({from:'ai', type:'text', text:'已确认录入采购需求，并同步生成批次采购明细。你可以在「数据看板 > 批次详情 > 采购明细」中继续编辑。'});
+      toast('采购需求已录入');
+      render(); scrollChatBottom();
+    }
+    function chooseSupplier(id){
+      closeModal();
+      const msg = state.messages.find(m => m.id === id);
+      if(msg) lockMessage(msg, 'done');
+      state.flows.find(f=>f.id==='f4').status = '已完成';
+      state.messages.push({from:'ai', type:'text', text:'已选择 B建材贸易公司，并生成供应商选择记录、付款待办和报价对比归档。'});
+      toast('供应商已选择');
+      render(); scrollChatBottom();
+    }
+    function refreshMarket(){
+      closeModal();
+      state.messages.push({id:`m_market_${Date.now()}`, from:'ai', type:'marketCard', status:'pending'});
+      toast('市场价已刷新');
+      render(); scrollChatBottom();
+    }
+    function archivePayment(id){
+      const msg = state.messages.find(m => m.id === id);
+      if(msg) lockMessage(msg, 'archived');
+      state.financeRecords[0].status = '已完成';
+      state.messages.push({from:'ai', type:'text', text:'付款记录已归档到当前批次，并更新财务报表现金流。'});
+      toast('付款已归档');
+      render(); scrollChatBottom();
+    }
+    function createProject(){
+      const name = document.getElementById('newProjectName')?.value || '新建项目';
+      const id = 'p' + (state.projects.length + 1);
+      state.projects.push({ id, name, status:'进行中', purchase:0, sales:0, profit:0, margin:0, progress:0, updated:'今天' });
+      state.selectedProjectId = id;
+      closeModal(); render(); toast('项目已创建');
+    }
+    function createBatch(){
+      const name = document.getElementById('newBatchName')?.value || '新建批次';
+      const id = 'b' + (state.batches.length + 1);
+      state.batches.push({ id, projectId:state.selectedProjectId, name, status:'待报价', purchase:0, sales:0, profit:0, margin:0, progress:0 });
+      state.selectedBatchId = id;
+      closeModal(); render(); toast('批次已创建');
+    }
+
+    render();
+  </script>
+</body>
+</html>

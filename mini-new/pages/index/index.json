@@ -1,0 +1,9 @@
+{
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "backgroundColor": "#f4f5f7",
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "xicon": "/components/xicon/index"
+  }
+}

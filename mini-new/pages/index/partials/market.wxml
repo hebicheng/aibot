@@ -1,0 +1,309 @@
+<!-- 市场行情：Tab1 项目对比（批次材料 × 市场价） / Tab2 全量行情（筛选 + 行情列表） -->
+<scroll-view
+  wx:if="{{activeTab==='market'}}"
+  class="page-scroll"
+  style="{{pageScrollStyle}}"
+  scroll-y
+  refresher-enabled
+  refresher-triggered="{{refreshing}}"
+  bindrefresherrefresh="refreshMarket"
+>
+  <view class="page-inner mkt-page">
+
+    <!-- 分段 Tab：项目对比 / 全量行情 -->
+    <view class="mkt-tabs card">
+      <view
+        class="mkt-tab {{marketTab==='compare' ? 'is-active' : ''}}"
+        data-tab="compare"
+        bindtap="setMarketTab"
+      >
+        <xicon name="doc" size="30" color="{{marketTab==='compare' ? '#ffffff' : '#54607a'}}" stroke="{{2}}" />
+        <text>项目对比</text>
+      </view>
+      <view
+        class="mkt-tab {{marketTab==='quotes' ? 'is-active' : ''}}"
+        data-tab="quotes"
+        bindtap="setMarketTab"
+      >
+        <xicon name="trend" size="30" color="{{marketTab==='quotes' ? '#ffffff' : '#54607a'}}" stroke="{{2}}" />
+        <text>全量行情</text>
+      </view>
+    </view>
+
+    <!-- ================= Tab1 项目对比 ================= -->
+    <block wx:if="{{marketTab==='compare'}}">
+      <view wx:if="{{!currentBatch}}" class="empty">
+        <view class="empty-ico"><xicon name="doc" size="56" color="#b4b9c6" /></view>
+        <view class="empty-title">请先选择项目与批次</view>
+        <view class="empty-sub">在顶部切换当前批次后，即可对比采购价与市场行情。</view>
+      </view>
+
+      <block wx:else>
+        <!-- 对比概要 KPI -->
+        <view wx:if="{{marketCompare}}" class="mkt-kpis card">
+          <view class="mkt-kpi">
+            <text>材料数</text>
+            <view class="mkt-kpi-val">{{marketCompare.totalMaterials}}</view>
+            <view class="mkt-kpi-sub">已匹配 {{marketCompare.matchedMaterials}}<text wx:if="{{marketCompare.unmatchedMaterials > 0}}" class="tone-red"> · 未匹配 {{marketCompare.unmatchedMaterials}}</text></view>
+          </view>
+          <view class="mkt-kpi">
+            <text>批次采购额</text>
+            <view class="mkt-kpi-val">{{marketCompare.businessText}}</view>
+            <view class="mkt-kpi-sub">业务单价 × 数量</view>
+          </view>
+          <view class="mkt-kpi">
+            <text>市场参考额</text>
+            <view class="mkt-kpi-val">{{marketCompare.marketText}}</view>
+            <view class="mkt-kpi-sub">市场价 × 数量</view>
+          </view>
+          <view class="mkt-kpi">
+            <text>总价差（业务−市场）</text>
+            <view class="mkt-kpi-val {{marketCompare.diffTone}}">{{marketCompare.diffText}}</view>
+            <view class="mkt-kpi-sub">均差率 {{marketCompare.avgRateText}}</view>
+          </view>
+        </view>
+
+        <!-- 城市/产地切换 + 重新匹配 -->
+        <view class="mkt-toolbar">
+          <view class="mkt-toolbar-left">
+            <picker mode="selector" range="{{marketCities}}" value="{{marketCityIndex}}" bindchange="onMarketCityChange">
+              <view class="mkt-city" hover-class="mkt-city-hover">
+                <xicon name="move" size="26" color="#54607a" stroke="{{2}}" />
+                <text class="mkt-city-label">对比城市</text>
+                <text class="mkt-city-value">{{marketCity}}</text>
+                <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+              </view>
+            </picker>
+            <picker mode="selector" range="{{marketOrigins}}" value="{{marketCompareOriginIndex}}" bindchange="onMarketCompareOriginChange">
+              <view class="mkt-city" hover-class="mkt-city-hover">
+                <xicon name="filter" size="26" color="#54607a" stroke="{{2}}" />
+                <text class="mkt-city-label">对比产地</text>
+                <text class="mkt-city-value">{{marketCompareOriginLabel}}</text>
+                <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+              </view>
+            </picker>
+          </view>
+          <view class="mkt-rerun {{marketLoading ? 'is-loading' : ''}}" bindtap="rerunMarketMatch" hover-class="{{marketLoading ? '' : 'mkt-rerun-hover'}}">
+            <xicon name="refresh" size="26" color="#2f66f6" stroke="{{2}}" />
+            <text>{{marketLoading ? '匹配中…' : '重新匹配'}}</text>
+          </view>
+        </view>
+
+        <!-- 材料对比列表（移动端卡片式） -->
+        <view wx:if="{{marketCompare && marketCompare.materials.length}}" class="mkt-list">
+          <view
+            wx:for="{{marketCompare.materials}}"
+            wx:key="materialId"
+            class="mkt-item card fade-in {{item.isMatched ? '' : 'is-unmatched'}}"
+          >
+            <!-- 顶部：原始名称 + 型号 + 状态 -->
+            <view class="mkt-item-head">
+              <view class="mkt-item-copy">
+                <view class="mkt-item-name text-ellipsis">{{item.materialName}}</view>
+                <view class="mkt-item-spec text-ellipsis">{{item.materialSpec}}</view>
+              </view>
+              <view wx:if="{{item.isMatched}}" class="badge tint-green">
+                <view class="badge-dot"></view>{{item.matchStatusLabel}}
+              </view>
+              <view wx:else class="badge tint-red"><view class="badge-dot"></view>未匹配</view>
+            </view>
+
+            <!-- 匹配行情（如有） -->
+            <view wx:if="{{item.isMatched}}" class="mkt-item-match">
+              <xicon name="trend" size="26" color="#1aa6b8" stroke="{{2}}" />
+              <view class="mkt-item-match-copy">
+                <view class="mkt-item-match-spec text-ellipsis">{{item.marketLabel}}</view>
+                <view class="mkt-item-match-date">{{item.quoteDateText}} · {{item.city}}<text wx:if="{{item.origin}}"> · {{item.origin}}</text></view>
+              </view>
+            </view>
+
+            <!-- 锁定行情（送货单确认时的取价依据，与最新行情独立展示；对齐 web locked* 列） -->
+            <view wx:if="{{item.lockedDateText}}" class="mkt-item-lock">
+              <text class="mkt-lock-label">锁定行情</text>
+              <text class="mkt-lock-val">{{item.lockedDateText}}<text wx:if="{{item.lockedOriginText}}"> · {{item.lockedOriginText}}</text><text wx:if="{{item.lockedPriceText}}"> · {{item.lockedPriceText}}/{{item.unit || '吨'}}</text><text wx:if="{{item.isManualPrice}}" class="mkt-manual-tag">人工</text></text>
+            </view>
+
+            <!-- 价格对比行 -->
+            <view class="mkt-item-prices">
+              <view class="mkt-price">
+                <text>业务单价</text>
+                <view class="mkt-price-val">{{item.businessText}}</view>
+              </view>
+              <view class="mkt-price-arrow">
+                <xicon name="chevronRight" size="22" color="#c5c9d3" />
+              </view>
+              <view class="mkt-price">
+                <text>市场价</text>
+                <view wx:if="{{item.isMatched}}" class="mkt-price-val {{item.marketPrice==null ? 'mkt-price-na' : ''}}">{{item.marketPrice==null ? '暂无价' : item.marketText}}</view>
+                <view wx:else class="mkt-price-val mkt-price-na">—</view>
+              </view>
+              <view class="mkt-diff">
+                <text>价差</text>
+                <view class="mkt-diff-val {{item.diffTone}}">{{item.diffText}}</view>
+                <view class="mkt-diff-rate {{item.diffTone}}">{{item.diffRateText}}</view>
+              </view>
+            </view>
+
+            <!-- 底部操作 -->
+            <view class="mkt-item-actions">
+              <block wx:if="{{item.isMatched}}">
+                <view class="mkt-item-meta">数量 {{item.qtyText}} · {{item.unit}}</view>
+                <view class="mkt-bind-btn mkt-bind-btn-ghost" catchtap="openMarketBind" data-material-id="{{item.materialId}}">
+                  <xicon name="edit" size="24" color="#315fbd" stroke="{{2}}" />调整绑定
+                </view>
+              </block>
+              <block wx:else>
+                <view class="mkt-item-meta">数量 {{item.qtyText}} · {{item.unit}}</view>
+                <view class="mkt-bind-btn" catchtap="openMarketBind" data-material-id="{{item.materialId}}">
+                  <xicon name="plus" size="24" color="#ffffff" stroke="{{2}}" />绑定行情
+                </view>
+              </block>
+            </view>
+          </view>
+        </view>
+
+        <view wx:else class="empty">
+          <view class="empty-ico"><xicon name="doc" size="56" color="#b4b9c6" /></view>
+          <view class="empty-title">该批次暂无材料</view>
+          <view class="empty-sub">确认采购单后，材料会自动进入对比列表。</view>
+        </view>
+      </block>
+    </block>
+
+    <!-- ================= Tab2 全量行情 ================= -->
+    <block wx:if="{{marketTab==='quotes'}}">
+      <!-- 筛选栏：分类 / 产品 / 城市 + 搜索 -->
+      <view class="mkt-filter card">
+        <view class="mkt-filter-row">
+          <picker mode="selector" range="{{marketCategories}}" value="{{marketCategoryIndex}}" bindchange="onMarketCategoryChange">
+            <view class="mkt-picker" hover-class="mkt-picker-hover">
+              <text class="mkt-picker-label">分类</text>
+              <text class="mkt-picker-value text-ellipsis">{{marketCategoryLabel}}</text>
+              <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+            </view>
+          </picker>
+          <picker mode="selector" range="{{marketProductOptions}}" range-key="label" value="{{marketProductIndex}}" bindchange="onMarketProductChange">
+            <view class="mkt-picker" hover-class="mkt-picker-hover">
+              <text class="mkt-picker-label">产品</text>
+              <text class="mkt-picker-value text-ellipsis">{{marketProductLabel}}</text>
+              <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+            </view>
+          </picker>
+          <picker mode="selector" range="{{marketCities}}" value="{{marketQuoteCityIndex}}" bindchange="onMarketQuoteCityChange">
+            <view class="mkt-picker" hover-class="mkt-picker-hover">
+              <text class="mkt-picker-label">城市</text>
+              <text class="mkt-picker-value text-ellipsis">{{marketQuoteCityLabel}}</text>
+              <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+            </view>
+          </picker>
+          <picker mode="selector" range="{{marketOrigins}}" value="{{marketQuoteOriginIndex}}" bindchange="onMarketQuoteOriginChange">
+            <view class="mkt-picker" hover-class="mkt-picker-hover">
+              <text class="mkt-picker-label">产地</text>
+              <text class="mkt-picker-value text-ellipsis">{{marketQuoteOriginLabel}}</text>
+              <xicon name="chevronDown" size="22" color="#8a96a8" stroke="{{2}}" />
+            </view>
+          </picker>
+        </view>
+        <view class="mkt-searchbar searchbar">
+          <xicon name="search" size="30" color="#8a90a0" />
+          <input class="searchbar-input" value="{{marketQuery}}" placeholder="搜索规格 / 材质，如 Φ25 或 HRB400E" placeholder-class="composer-ph" bindinput="updateMarketQuery" />
+          <view wx:if="{{marketQuery}}" class="searchbar-clear" bindtap="clearMarketQuery"><xicon name="close" size="24" color="#8a90a0" stroke="{{2}}" /></view>
+        </view>
+      </view>
+
+      <!-- 行情列表（按产品分组卡片） -->
+      <view wx:if="{{marketQuoteGroups.length}}" class="mkt-groups">
+        <view wx:for="{{marketQuoteGroups}}" wx:key="productCode" wx:for-item="group" class="mkt-group card fade-in">
+          <view class="mkt-group-head">
+            <view class="mkt-group-title">
+              <view class="mkt-group-name">{{group.productName}}</view>
+              <view class="mkt-group-meta">{{group.count}} 条 · {{marketLatestDate}}</view>
+            </view>
+            <view class="mkt-group-city">{{group.city || '全部城市'}}</view>
+          </view>
+          <view class="mkt-group-rows">
+            <view wx:for="{{group.rows}}" wx:key="id" wx:for-item="row" class="mkt-qrow">
+              <view class="mkt-qrow-main">
+                <view class="mkt-qrow-spec text-ellipsis">{{row.specLabel}}</view>
+                <view class="mkt-qrow-grade">{{row.grade || '—'}}<text wx:if="{{row.origin}}" class="mkt-qrow-origin"> · {{row.origin}}</text></view>
+              </view>
+              <view class="mkt-qrow-side">
+                <view class="mkt-qrow-price">{{row.priceText}}</view>
+                <view class="mkt-qrow-change {{row.changeTone}}">
+                  <text wx:if="{{row.change>0}}">+{{row.change}}</text>
+                  <text wx:elif="{{row.change<0}}">{{row.change}}</text>
+                  <text wx:else>—</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:else class="empty">
+        <view class="empty-ico"><xicon name="trend" size="56" color="#b4b9c6" /></view>
+        <view class="empty-title">暂无行情数据</view>
+        <view class="empty-sub">行情每日更新，请稍后下拉刷新查看。</view>
+      </view>
+    </block>
+
+    <view class="mkt-bottom-spacer"></view>
+  </view>
+</scroll-view>
+
+<!-- 人工绑定行情浮层 -->
+<view wx:if="{{marketBindVisible}}" class="sheet-mask" bindtap="closeMarketBind"></view>
+<view wx:if="{{marketBindVisible}}" class="mkt-bind-sheet">
+  <view class="mkt-sheet-handle"></view>
+  <view class="mkt-sheet-head">
+    <view class="mkt-sheet-title">绑定行情</view>
+    <view class="mkt-sheet-close" bindtap="closeMarketBind"><xicon name="close" size="28" color="#8a96a8" stroke="{{2}}" /></view>
+  </view>
+  <view wx:if="{{marketBindMaterial}}" class="mkt-sheet-material">
+    <view class="mkt-sheet-material-name text-ellipsis">{{marketBindMaterial.materialName}}</view>
+    <view class="mkt-sheet-material-spec text-ellipsis">{{marketBindMaterial.materialSpec}}</view>
+  </view>
+
+  <!-- 产品选择 -->
+  <view class="mkt-sheet-field">
+    <view class="field-label">行情产品</view>
+    <picker mode="selector" range="{{marketProducts}}" range-key="label" value="{{marketBindProductIndex}}" bindchange="onBindProductChange">
+      <view class="mkt-sheet-picker {{marketBindProductLabel ? '' : 'is-placeholder'}}">
+        <text>{{marketBindProductLabel || '— 选择产品 —'}}</text>
+        <xicon name="chevronDown" size="24" color="#8a96a8" stroke="{{2}}" />
+      </view>
+    </picker>
+  </view>
+
+  <!-- 规格选择 -->
+  <view class="mkt-sheet-field">
+    <view class="field-label">行情规格</view>
+    <picker mode="selector" range="{{marketBindSpecs}}" range-key="label" value="{{marketBindSpecIndex}}" bindchange="onBindSpecChange">
+      <view class="mkt-sheet-picker {{marketBindSpecLabel ? '' : 'is-placeholder'}}">
+        <text>{{marketBindSpecLabel || (marketBindSpecs.length ? '— 选择规格 —' : '该产品暂无规格候选')}}</text>
+        <xicon name="chevronDown" size="24" color="#8a96a8" stroke="{{2}}" />
+      </view>
+    </picker>
+  </view>
+
+  <!-- 锁定行情价（选填）：人工改价入口，台账销售明细弹框不再提供改价 -->
+  <view class="mkt-sheet-field">
+    <view class="field-label">锁定行情价（元/吨，选填）</view>
+    <input
+      class="mkt-sheet-price"
+      type="digit"
+      value="{{marketBindPrice}}"
+      placeholder="留空则按行情库价格锁定"
+      placeholder-class="composer-ph"
+      bindinput="onBindPriceInput"
+    />
+    <view class="mkt-sheet-hint">填写后按此价锁定该材料组，并按定价方式自动重算销售单价（台账、对账单同步跟随）；清空后保存则恢复按行情库取价。</view>
+  </view>
+
+  <view class="mkt-sheet-actions">
+    <view class="btn btn-ghost mkt-sheet-cancel" bindtap="closeMarketBind">取消</view>
+    <view class="btn btn-primary mkt-sheet-confirm {{(marketBindProduct && marketBindSpec) ? '' : 'is-disabled'}}" bindtap="confirmMarketBind">
+      <xicon name="check" size="30" color="#ffffff" stroke="{{2}}" />确认绑定
+    </view>
+  </view>
+</view>

@@ -1,0 +1,281 @@
+<!-- 项目与批次：当前项目详情页（对齐 Web project-main，按截图 1:1 还原） -->
+<scroll-view
+  wx:if="{{activeTab==='projects'}}"
+  class="page-scroll"
+  style="{{pageScrollStyle}}"
+  scroll-y
+  refresher-enabled
+  refresher-triggered="{{refreshing}}"
+  bindrefresherrefresh="refreshAll"
+>
+  <view class="page-inner pj-page">
+
+    <!-- 空态：还没有项目 -->
+    <view wx:if="{{!projects.length}}" class="pj-empty">
+      <view class="pj-empty-ico"><xicon name="layers" size="56" color="#2f66f6" /></view>
+      <view class="pj-empty-title">从一个项目开始</view>
+      <view class="pj-empty-sub">项目用于归集同一客户的业务批次，创建后 AI 才能准确归档你的单据资料。</view>
+      <view class="btn btn-primary pj-empty-btn" bindtap="openCreateProject">
+        <xicon name="plus" size="32" color="#ffffff" stroke="{{2}}" />新建项目
+      </view>
+    </view>
+
+    <block wx:else>
+      <!-- 当前项目 Hero -->
+      <view wx:if="{{currentProject}}" class="pj-hero">
+        <view class="pj-hero-glow"></view>
+        <view class="pj-hero-head">
+          <view class="pj-hero-eyebrow">当前项目</view>
+          <view class="pj-hero-head-right">
+            <view class="pj-hero-edit" bindtap="openEditProject" hover-class="menu-item-hover">
+              <xicon name="edit" size="24" color="#54607a" stroke="{{2}}" /><text>编辑</text>
+            </view>
+            <view class="pj-hero-badge"><view class="pj-hero-badge-dot"></view>{{currentProject.statusLabel}}</view>
+          </view>
+        </view>
+        <view class="pj-hero-body">
+          <view class="pj-hero-copy">
+            <view class="pj-hero-name text-ellipsis">{{currentProject.name}}</view>
+            <view class="pj-hero-customer text-ellipsis">{{currentProject.customerName || '未填写客户'}}</view>
+          </view>
+          <view class="pj-hero-state">
+            <view class="pj-hero-progress">{{currentProject.progress}}<text>%</text></view>
+            <view class="pj-hero-progress-sub">综合进度</view>
+          </view>
+        </view>
+        <view class="pj-hero-bar"><view class="pj-hero-bar-fill" style="{{currentProject.progressStyle}}"></view></view>
+      </view>
+
+      <!-- 项目级 KPI（单卡片：上=图标+名称，下=数据） -->
+      <view wx:if="{{currentProject}}" class="pj-kpis card">
+        <view class="pj-kpi">
+          <view class="pj-kpi-head">
+            <view class="pj-kpi-ico kpi-blue"><xicon name="doc" size="26" color="#ffffff" /></view>
+            <text class="pj-kpi-name">采购金额</text>
+          </view>
+          <view class="pj-kpi-val {{currentProject.purchaseSize}}">{{currentProject.purchaseText}}</view>
+        </view>
+        <view class="pj-kpi">
+          <view class="pj-kpi-head">
+            <view class="pj-kpi-ico kpi-green"><xicon name="cash" size="26" color="#ffffff" /></view>
+            <text class="pj-kpi-name">已付款</text>
+          </view>
+          <view class="pj-kpi-val {{currentProject.paidSize}}">{{currentProject.paidText}}</view>
+        </view>
+        <view class="pj-kpi">
+          <view class="pj-kpi-head">
+            <view class="pj-kpi-ico kpi-cyan"><xicon name="invoice" size="26" color="#ffffff" /></view>
+            <text class="pj-kpi-name">已开票</text>
+          </view>
+          <view class="pj-kpi-val {{currentProject.invoiceSize}}">{{currentProject.invoiceText}}</view>
+        </view>
+        <view class="pj-kpi">
+          <view class="pj-kpi-head">
+            <view class="pj-kpi-ico kpi-purple"><xicon name="records" size="26" color="#ffffff" /></view>
+            <text class="pj-kpi-name">已收款</text>
+          </view>
+          <view class="pj-kpi-val {{currentProject.receivedSize}}">{{currentProject.receivedText}}</view>
+        </view>
+      </view>
+
+      <!-- 批次列表 -->
+      <view class="pj-section-head">
+        <view class="pj-section-title">批次列表</view>
+        <view class="pj-head-spacer"></view>
+        <view class="pj-head-btn" bindtap="openCreateBatch">
+          <xicon name="plus" size="26" color="#2f66f6" stroke="{{2}}" />新建批次
+        </view>
+      </view>
+      <view class="pb-list card">
+        <view
+          wx:for="{{currentProject.batches}}"
+          wx:key="id"
+          class="pb-row {{currentBatch && currentBatch.id===item.id ? 'is-active' : ''}}"
+          hover-class="pb-row-hover"
+          data-id="{{item.id}}"
+          bindtap="selectBatch"
+        >
+          <view class="pb-main">
+            <view class="pb-top">
+              <view class="pb-name-wrap">
+                <view class="pb-name text-ellipsis">{{item.name}}</view>
+                <view class="pb-date">{{item.dateText}}</view>
+              </view>
+              <view class="pb-status">
+                <view class="badge tint-{{item.statusTone}}"><view class="badge-dot"></view>{{item.statusLabel}}</view>
+                <xicon name="chevronRight" size="26" color="#b4b9c6" />
+              </view>
+            </view>
+            <view class="pb-bottom">
+              <view class="pb-material text-ellipsis">{{item.materialText}}</view>
+              <view class="pb-meta">
+                <view class="pb-amt">{{item.purchaseText}}</view>
+                <view class="pb-progress">
+                  <view class="pb-progress-bar"><view class="pb-progress-fill" style="{{item.progressStyle}}"></view></view>
+                </view>
+                <text class="pb-progress-num">{{item.progress}}%</text>
+              </view>
+            </view>
+          </view>
+          <view class="pb-actions">
+            <view class="pb-edit" data-id="{{item.id}}" catchtap="openEditBatch" aria-role="button" aria-label="编辑批次">
+              <xicon name="edit" size="26" color="#8a96a8" />
+            </view>
+            <view class="pb-del" data-id="{{item.id}}" catchtap="deleteBatch" aria-role="button" aria-label="删除批次">
+              <xicon name="trash" size="28" color="#c2c7d2" />
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{!currentProject.batches.length}}" class="pb-empty">
+          该项目还没有批次，点击右上角「新建批次」创建第一个批次。
+        </view>
+      </view>
+
+      <!-- 当前批次业务闭环 -->
+      <view wx:if="{{currentBatch}}" class="pj-closure card">
+        <view class="pj-closure-head">
+          <view class="pj-closure-copy">
+            <view class="pj-closure-title">当前批次业务闭环</view>
+            <view class="pj-closure-sub text-ellipsis">{{currentBatch.name}}</view>
+          </view>
+          <view class="pj-closure-cta" bindtap="gotoWorkspace">
+            <xicon name="robot" size="26" color="#ffffff" />前往智能助理导入
+          </view>
+        </view>
+        <view class="pj-timeline">
+          <view wx:for="{{batchClosure}}" wx:key="key" class="pj-node {{item.done ? 'is-done' : ''}}">
+            <view class="pj-node-dot">
+              <xicon wx:if="{{item.done}}" name="check" size="22" color="#ffffff" stroke="{{2.6}}" />
+              <text wx:else>{{index + 1}}</text>
+            </view>
+            <view class="pj-node-label">{{item.label}}</view>
+            <view class="pj-node-value text-clamp-2">{{item.value}}</view>
+            <view wx:if="{{index < batchClosure.length - 1}}" class="pj-node-line {{item.done ? 'is-done' : ''}}"></view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 票款货匹配 + 批次对账摘要 -->
+      <view wx:if="{{currentBatch && batchMatchSummary && batchSummary}}" class="pj-grid-2">
+        <!-- 票款货匹配 -->
+        <view class="pj-panel card">
+          <view class="pj-panel-head">
+            <view class="pj-panel-title">票款货匹配</view>
+            <view class="pj-panel-rate">{{currentBatch.progress}}%</view>
+          </view>
+          <view class="pj-match-flow">
+            <block wx:for="{{batchMatchSummary.steps}}" wx:key="key">
+              <view class="pj-match-item {{item.done ? 'is-done' : ''}}">
+                <view class="pj-match-ico">
+                  <xicon name="{{item.icon}}" size="28" color="{{item.color}}" />
+                </view>
+                <view class="pj-match-name">{{item.label}}</view>
+                <view class="pj-match-detail">{{item.detail}}</view>
+              </view>
+              <view wx:if="{{index < batchMatchSummary.steps.length - 1}}" class="pj-match-arrow">
+                <xicon name="chevronRight" size="22" color="#d0d5e3" />
+              </view>
+            </block>
+          </view>
+          <view class="pj-match-rates">
+            <view class="pj-match-rate">
+              <text>开票率</text>
+              <view>{{batchMatchSummary.invoiceRateText}}</view>
+            </view>
+            <view class="pj-match-rate">
+              <text>付款率</text>
+              <view>{{batchMatchSummary.paymentRateText}}</view>
+            </view>
+            <view class="pj-match-rate">
+              <text>到货率</text>
+              <view>{{batchMatchSummary.deliveryRateText}}</view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 批次对账摘要 -->
+        <view class="pj-panel card">
+          <view class="pj-panel-head">
+            <view class="pj-panel-title">批次对账摘要</view>
+            <view class="pj-panel-link" bindtap="setTab" data-key="ledger">
+              查看台账<xicon name="chevronRight" size="22" color="#2f66f6" />
+            </view>
+          </view>
+          <view class="pj-summary-grid">
+            <view class="pj-summary-cell">
+              <text>采购金额</text>
+              <view>{{batchSummary.purchaseText}}</view>
+            </view>
+            <view class="pj-summary-cell">
+              <text>未付款</text>
+              <view class="tone-red">{{batchSummary.unpaidText}}</view>
+            </view>
+            <view class="pj-summary-cell">
+              <text>未开票</text>
+              <view class="tone-orange">{{batchSummary.invoiceGapText}}</view>
+            </view>
+            <view class="pj-summary-cell">
+              <text>已收款</text>
+              <view class="tone-green">{{batchSummary.receivedText}}</view>
+            </view>
+          </view>
+          <view wx:if="{{batchSummary.alert}}" class="pj-panel-alert" bindtap="setTab" data-key="data">
+            <view class="pj-alert-ico tint-{{batchSummary.alert.tone}}">
+              <xicon name="{{batchSummary.alert.icon}}" size="28" color="{{batchSummary.alert.color}}" />
+            </view>
+            <view class="pj-alert-copy">
+              <view>{{batchSummary.alert.text}}</view>
+              <text>{{batchSummary.alert.sub}}</text>
+            </view>
+            <xicon name="chevronRight" size="24" color="#b4b9c6" />
+          </view>
+        </view>
+      </view>
+
+      <!-- 批次关联单据 + 批次待办 -->
+      <view wx:if="{{currentBatch}}" class="pj-grid-2">
+        <!-- 关联单据 -->
+        <view class="pj-panel card">
+          <view class="pj-panel-head">
+            <view class="pj-panel-title">批次关联单据</view>
+            <view class="pj-panel-link" bindtap="setTab" data-key="data">
+              全部单据<xicon name="chevronRight" size="22" color="#2f66f6" />
+            </view>
+          </view>
+          <view wx:if="{{batchDocuments.length}}" class="pj-doc-list">
+            <view wx:for="{{batchDocuments}}" wx:key="id" class="pj-doc-item">
+              <view class="pj-doc-ico tint-{{item.typeTone}}"><xicon name="{{item.typeIcon}}" size="30" color="{{item.typeColor}}" /></view>
+              <view class="pj-doc-copy">
+                <view class="pj-doc-title text-ellipsis">{{item.typeLabel}} · {{item.document.docCode || '未编号'}}</view>
+                <view class="pj-doc-sub text-ellipsis">{{item.document.supplierName || item.batchName}}</view>
+              </view>
+              <view class="pj-doc-tail">
+                <view class="pj-doc-amt">{{item.amountText}}</view>
+                <view class="badge tint-{{item.statusTone}}"><view class="badge-dot"></view>{{item.statusLabel}}</view>
+              </view>
+            </view>
+          </view>
+          <view wx:else class="pj-panel-empty">当前批次暂无关联单据</view>
+        </view>
+
+        <!-- 待办 -->
+        <view class="pj-panel card">
+          <view class="pj-panel-head">
+            <view class="pj-panel-title">批次待办</view>
+          </view>
+          <view wx:if="{{unresolvedCount}}" class="pj-todo-alert tint-orange" bindtap="setTab" data-key="data">
+            <xicon name="warning" size="32" color="#c8781f" />
+            <view class="pj-todo-alert-copy">
+              <view>{{unresolvedCount}}张单据等待人工确认</view>
+              <text>识别字段已填充，可在数据中心检查。</text>
+            </view>
+          </view>
+          <view wx:else class="pj-panel-empty">当前批次没有待确认单据</view>
+        </view>
+      </view>
+
+      <view class="pj-bottom-spacer"></view>
+    </block>
+
+  </view>
+</scroll-view>

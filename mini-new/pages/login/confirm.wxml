@@ -1,0 +1,32 @@
+<!-- 扫码登录确认页：确认在电脑端登录（custom 全屏，顶部状态栏占位避免露黑边） -->
+<view class="confirm-page">
+  <view class="confirm-statusbar" style="height:{{safeTop}}px"></view>
+  <view class="confirm-body">
+    <view class="confirm-card">
+      <view class="confirm-icon">
+        <view class="confirm-icon-ring"></view>
+        <text class="confirm-icon-mark">✓</text>
+      </view>
+
+      <view class="confirm-title">确认在电脑上登录</view>
+      <view class="confirm-sub">扫码后即可在「衡账 · AI 项目对账平台」网页端登录</view>
+
+      <block wx:if="{{status==='success'}}">
+        <view class="confirm-done">
+          <text class="confirm-done-title">确认成功</text>
+          <text class="confirm-done-sub">请返回电脑端，页面将自动进入系统</text>
+        </view>
+        <view class="confirm-btn confirm-btn-ghost" bindtap="goHome">返回小程序首页</view>
+      </block>
+
+      <block wx:else>
+        <view wx:if="{{status==='error'}}" class="confirm-error">{{error}}</view>
+        <view class="confirm-btn {{status==='confirming' ? 'is-loading' : ''}}" bindtap="confirmLogin">
+          {{status==='confirming' ? '确认中…' : '确认登录'}}
+        </view>
+        <view class="confirm-btn confirm-btn-ghost" bindtap="goHome">返回小程序首页</view>
+        <view class="confirm-tip">{{devPreview ? '开发者工具预览模式（未扫码，仅用于检查 UI）' : '确认后代表你同意使用当前微信身份登录'}}</view>
+      </block>
+    </view>
+  </view>
+</view>

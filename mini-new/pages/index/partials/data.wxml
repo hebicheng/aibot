@@ -1,0 +1,74 @@
+<!-- 业务数据中心：数据副标题 + 搜索/智能导入 + 类型筛选 + 资料列表 -->
+<scroll-view
+  wx:if="{{activeTab==='data'}}"
+  class="page-scroll"
+  style="{{pageScrollStyle}}"
+  scroll-y
+  refresher-enabled
+  refresher-triggered="{{refreshing}}"
+  bindrefresherrefresh="refreshAll"
+>
+  <view class="page-inner">
+    <!-- 搜索 + 智能导入 -->
+    <view class="data-search-row">
+      <view class="searchbar data-searchbar">
+        <xicon name="search" size="32" color="#8a90a0" />
+        <input class="searchbar-input" value="{{dataQuery}}" placeholder="搜索单号、单位、材料" placeholder-class="composer-ph" bindinput="updateDataQuery" />
+        <view wx:if="{{dataQuery}}" class="searchbar-clear" bindtap="clearDataQuery"><xicon name="close" size="24" color="#8a90a0" stroke="{{2}}" /></view>
+      </view>
+      <view class="data-smart-import" bindtap="smartImport" hover-class="data-smart-import-hover">
+        <xicon name="sparkle" size="30" color="#ffffff" stroke="{{2}}" />
+        <text class="data-smart-import-text">智能导入</text>
+      </view>
+    </view>
+
+    <!-- 类型筛选 -->
+    <scroll-view class="filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="filter-row">
+        <view
+          wx:for="{{dataTypes}}"
+          wx:key="value"
+          class="filter-pill {{item.active ? 'is-active' : ''}}"
+          data-value="{{item.value}}"
+          bindtap="setDataType"
+        >{{item.label}}</view>
+        <view class="filter-pill filter-pill-icon" bindtap="toggleAdvancedFilter" hover-class="filter-pill-hover">
+          <xicon name="filter" size="28" color="#54607a" stroke="{{2}}" />
+        </view>
+      </view>
+    </scroll-view>
+
+    <view wx:if="{{filteredRecords.length}}" class="record-list">
+      <view
+        wx:for="{{filteredRecords}}"
+        wx:key="id"
+        class="record-card fade-in"
+        data-id="{{item.document.id}}"
+        bindtap="openDocument"
+        hover-class="record-card-hover"
+      >
+        <view class="record-icon tint-{{item.typeTone}}"><xicon name="{{item.typeIcon}}" size="36" color="currentColor" /></view>
+        <view class="record-body">
+          <view class="record-title-row">
+            <view class="record-title text-ellipsis">{{item.typeLabel}} · <text class="record-code-inline">{{item.document.docCode || '未编号'}}</text></view>
+            <view wx:if="{{item.statusLabel}}" class="record-badge tint-{{item.statusTone}}">{{item.statusLabel}}</view>
+          </view>
+          <view class="record-line text-ellipsis">{{item.projectName}}</view>
+          <view class="record-line record-line-sub text-ellipsis">{{item.batchName}}</view>
+          <view class="record-line record-line-party text-ellipsis">{{item.partyLabel}}：{{item.document.supplierName || '待补充'}}</view>
+        </view>
+        <view class="record-side">
+          <view class="record-date">{{item.dateText}}</view>
+          <view class="record-amount">{{item.amountText}}</view>
+          <view class="record-chevron"><xicon name="chevronRight" size="26" color="#b4b9c6" stroke="{{2}}" /></view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:else class="empty">
+      <view class="empty-ico"><xicon name="search" size="56" color="#b4b9c6" /></view>
+      <view class="empty-title">没有找到匹配的业务资料</view>
+      <view class="empty-sub">调整筛选条件，或从智能助理导入新资料。</view>
+    </view>
+  </view>
+</scroll-view>

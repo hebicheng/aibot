@@ -1,0 +1,207 @@
+/* ============================================================
+   全局设计令牌 —— 与 Web 基线同源：企业蓝、深蓝文字、轻边框与克制层级。
+   ============================================================ */
+page {
+  --bg: #f3f6fa;
+  --surface: #ffffff;
+  --surface-2: #f7f9fc;
+  --surface-3: #edf1f6;
+  --line: #e6ebf2;
+  --line-strong: #dbe3ee;
+  --ink: #12213d;
+  --ink-2: #4d5d78;
+  --ink-3: #72809a;
+  --ink-4: #9ba7ba;
+  --brand: #2f66f6;
+  --brand-2: #2452d1;
+  --brand-soft: #edf3ff;
+  --brand-ink: #2452d1;
+  --green: #19a974;
+  --green-soft: #eaf8f2;
+  --orange: #f28a3a;
+  --orange-soft: #fff3e8;
+  --red: #e6535f;
+  --red-soft: #fff0f1;
+  --cyan: #1aa6b8;
+  --cyan-soft: #e9f9fb;
+  --blue: #2f66f6;
+  --blue-soft: #edf3ff;
+  --purple: #8b5cf6;
+  --purple-soft: #f3efff;
+  --gray: #72809a;
+  --gray-soft: #f1f4f8;
+  --shadow: 0 8rpx 28rpx rgba(35, 54, 88, 0.055);
+  --shadow-lg: 0 18rpx 48rpx rgba(35, 54, 88, 0.11);
+  --radius: 24rpx;
+  --radius-sm: 16rpx;
+  --radius-lg: 32rpx;
+
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", Helvetica, sans-serif;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+view, text, scroll-view, input, textarea, button, image, picker {
+  box-sizing: border-box;
+}
+
+/* 色调工具类：背景软色与前景强色 */
+.tone-blue { color: var(--blue); }
+.tone-green { color: var(--green); }
+.tone-orange { color: var(--orange); }
+.tone-red { color: var(--red); }
+.tone-cyan { color: var(--cyan); }
+.tone-purple { color: var(--purple); }
+.tone-gray { color: var(--gray); }
+
+.tint-blue { background: var(--blue-soft); color: var(--brand-ink); }
+.tint-green { background: var(--green-soft); color: #0f8f52; }
+.tint-orange { background: var(--orange-soft); color: #c8781f; }
+.tint-red { background: var(--red-soft); color: #d23a3a; }
+.tint-cyan { background: var(--cyan-soft); color: #0e8c99; }
+.tint-purple { background: var(--purple-soft); color: #7c4ddb; }
+.tint-gray { background: var(--gray-soft); color: var(--ink-2); }
+
+/* 状态徽标 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.badge-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 图标外圈软色底 */
+.icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18rpx;
+  flex-shrink: 0;
+}
+
+/* 通用卡片 */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* 主按钮：与 Web 一致的圆角矩形 + 扁平品牌蓝 */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  height: 84rpx;
+  border-radius: 20rpx;
+  font-size: 27rpx;
+  font-weight: 600;
+  border: none;
+}
+.btn::after { border: none; }
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 8rpx 18rpx rgba(47, 102, 246, 0.18);
+}
+.btn-primary.is-disabled {
+  background: var(--surface-3);
+  color: var(--ink-4);
+  box-shadow: none;
+}
+.btn-ghost {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.btn-danger {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.btn-warn {
+  background: var(--orange-soft);
+  color: #c8781f;
+}
+
+/* 表单基础 */
+.field-label {
+  font-size: 24rpx;
+  color: var(--ink-3);
+  margin-bottom: 12rpx;
+}
+.field-input {
+  width: 100%;
+  height: 84rpx;
+  padding: 0 24rpx;
+  background: var(--surface-2);
+  border: 2rpx solid transparent;
+  border-radius: 16rpx;
+  font-size: 27rpx;
+  color: var(--ink);
+}
+.field-input.is-focus { border-color: var(--brand); background: #fff; }
+.field-textarea {
+  width: 100%;
+  min-height: 132rpx;
+  padding: 20rpx 24rpx;
+  background: var(--surface-2);
+  border-radius: 16rpx;
+  font-size: 27rpx;
+  color: var(--ink);
+}
+
+/* 分隔线 */
+.hr { height: 2rpx; background: var(--line); }
+
+/* 空态 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 96rpx 48rpx;
+  text-align: center;
+  gap: 20rpx;
+}
+.empty-title { font-size: 28rpx; font-weight: 600; color: var(--ink-2); }
+.empty-sub { font-size: 25rpx; color: var(--ink-3); max-width: 460rpx; }
+
+/* 载入骨架 */
+.spin {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  border: 5rpx solid var(--surface-3);
+  border-top-color: var(--brand);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.fade-in { animation: fadeIn 0.28s ease both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.text-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}

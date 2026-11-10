@@ -1,0 +1,336 @@
+/* ============================================================
+   市场行情：分段 Tab / KPI / 材料对比卡片 / 全量行情筛选与分组列表 / 绑定浮层
+   ============================================================ */
+.mkt-page { padding-bottom: 40rpx; }
+
+/* ---- 分段 Tab（对齐 ledger filter-pill 激活态） ---- */
+.mkt-tabs {
+  display: flex;
+  gap: 8rpx;
+  padding: 8rpx;
+  margin-bottom: 20rpx;
+  background: var(--surface-2);
+  border-radius: 22rpx;
+}
+.mkt-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  height: 76rpx;
+  border-radius: 18rpx;
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--ink-2);
+  transition: all 180ms ease;
+}
+.mkt-tab.is-active {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 8rpx 18rpx rgba(47, 102, 246, 0.2);
+}
+
+/* ---- 对比概要 KPI（对齐 pj-kpis 单卡片四格） ---- */
+/* 注意：不用 CSS grid + fr（微信开发者工具 WXSS 编译器对 grid+fr（尤其 4 列）
+   存在 MaxCodeSize 编译崩溃 bug），改用 flex 等分布局 */
+.mkt-kpis {
+  display: flex;
+  margin-bottom: 20rpx;
+  padding: 22rpx 8rpx;
+}
+.mkt-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 0 6rpx;
+  min-width: 0;
+  flex: 1;
+}
+.mkt-kpi + .mkt-kpi { border-left: 2rpx solid var(--line); }
+.mkt-kpi text { font-size: 21rpx; color: var(--ink-3); white-space: nowrap; }
+.mkt-kpi-val {
+  font-size: 25rpx;
+  font-weight: 750;
+  color: var(--ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mkt-kpi-sub { font-size: 19rpx; color: var(--ink-4); white-space: nowrap; }
+
+/* ---- 工具栏：城市/产地切换（左，各占一半）+ 重新匹配（右，自适应）单行人机布局 ---- */
+.mkt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+}
+.mkt-toolbar-left {
+  display: flex;
+  gap: 10rpx;
+  flex: 1;
+  min-width: 0;
+}
+.mkt-city {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex: 1;
+  min-width: 0;
+  padding: 14rpx 18rpx;
+  background: var(--surface);
+  border: 2rpx solid var(--line);
+  border-radius: 18rpx;
+}
+.mkt-city-hover { background: var(--surface-2); }
+.mkt-city-label { font-size: 23rpx; color: var(--ink-3); flex-shrink: 0; }
+.mkt-city-value { font-size: 25rpx; font-weight: 700; color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mkt-rerun {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+  padding: 12rpx 20rpx;
+  background: var(--brand-soft);
+  border-radius: 16rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+.mkt-rerun-hover { opacity: 0.85; }
+.mkt-rerun.is-loading { opacity: 0.55; }
+
+/* ---- 材料对比卡片列表 ---- */
+.mkt-list { display: flex; flex-direction: column; gap: 18rpx; }
+.mkt-item {
+  padding: 24rpx;
+  border-radius: var(--radius);
+}
+.mkt-item.is-unmatched { background: #fffaf5; }
+.mkt-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.mkt-item-copy { min-width: 0; flex: 1; }
+.mkt-item-name { font-size: 29rpx; font-weight: 700; color: var(--ink); }
+.mkt-item-spec { margin-top: 4rpx; font-size: 23rpx; color: var(--ink-3); }
+
+/* 匹配行情摘要 */
+.mkt-item-match {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 16rpx;
+  padding: 14rpx 18rpx;
+  background: var(--cyan-soft);
+  border-radius: 16rpx;
+}
+.mkt-item-match-copy { min-width: 0; flex: 1; }
+.mkt-item-match-spec { font-size: 24rpx; font-weight: 700; color: #0e8c99; }
+.mkt-item-match-date { margin-top: 2rpx; font-size: 20rpx; color: #5d8d94; }
+
+/* 价格对比行 */
+.mkt-item-prices {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin-top: 18rpx;
+  padding: 16rpx 0;
+  border-top: 2rpx solid var(--line);
+}
+.mkt-price { display: flex; flex-direction: column; gap: 2rpx; min-width: 0; flex: 1; }
+.mkt-price text { font-size: 21rpx; color: var(--ink-3); }
+.mkt-price-val { font-size: 28rpx; font-weight: 750; color: var(--ink); }
+.mkt-price-na { color: var(--ink-4); font-weight: 600; }
+.mkt-price-arrow { color: var(--ink-4); flex-shrink: 0; }
+.mkt-diff {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2rpx;
+  flex-shrink: 0;
+}
+.mkt-diff text { font-size: 21rpx; color: var(--ink-3); }
+.mkt-diff-val { font-size: 26rpx; font-weight: 750; }
+.mkt-diff-rate { font-size: 20rpx; font-weight: 600; }
+
+/* 底部操作 */
+.mkt-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+.mkt-item-meta { font-size: 22rpx; color: var(--ink-4); }
+.mkt-bind-btn {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 10rpx 22rpx;
+  background: var(--brand);
+  border-radius: 999rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 6rpx 14rpx rgba(47, 102, 246, 0.18);
+}
+.mkt-bind-btn-ghost {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  box-shadow: none;
+}
+
+/* ---- Tab2 全量行情：筛选 + 分组列表 ---- */
+.mkt-filter {
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+}
+.mkt-filter-row {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+.mkt-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  min-width: 0;
+  flex: 1;
+  padding: 12rpx 14rpx;
+  background: var(--surface-2);
+  border-radius: 14rpx;
+}
+.mkt-picker-hover { background: var(--surface-3); }
+.mkt-picker-label { font-size: 19rpx; color: var(--ink-3); }
+.mkt-picker-value { font-size: 23rpx; font-weight: 700; color: var(--ink); max-width: 100%; }
+.mkt-searchbar { margin-bottom: 4rpx; }
+
+.mkt-groups { display: flex; flex-direction: column; gap: 18rpx; }
+.mkt-group { overflow: hidden; }
+.mkt-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  border-bottom: 2rpx solid var(--line);
+}
+.mkt-group-title { min-width: 0; }
+.mkt-group-name { font-size: 28rpx; font-weight: 700; color: var(--ink); }
+.mkt-group-meta { margin-top: 2rpx; font-size: 20rpx; color: var(--ink-4); }
+.mkt-group-city { font-size: 22rpx; color: var(--ink-3); flex-shrink: 0; }
+
+.mkt-group-rows { padding: 4rpx 0; }
+.mkt-qrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 16rpx 24rpx;
+  border-bottom: 2rpx solid var(--line);
+}
+.mkt-qrow:last-child { border-bottom: none; }
+.mkt-qrow-main { min-width: 0; flex: 1; }
+.mkt-qrow-spec { font-size: 25rpx; font-weight: 600; color: var(--ink); }
+.mkt-qrow-grade { margin-top: 2rpx; font-size: 20rpx; color: var(--ink-3); }
+.mkt-qrow-origin { color: var(--ink-2); }
+.mkt-qrow-side { display: flex; align-items: center; gap: 14rpx; flex-shrink: 0; }
+.mkt-qrow-price { font-size: 27rpx; font-weight: 750; color: var(--ink); }
+.mkt-qrow-change { font-size: 22rpx; font-weight: 700; }
+
+.mkt-bottom-spacer { height: 40rpx; }
+
+/* ---- 绑定行情底部弹层 ---- */
+.sheet-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(20, 24, 38, 0.42);
+  animation: fadeIn 0.2s ease;
+}
+.mkt-bind-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  padding: 0 32rpx 40rpx;
+  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-radius: 36rpx 36rpx 0 0;
+  animation: sheetUp 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mkt-sheet-handle {
+  width: 72rpx;
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: var(--line-strong);
+  margin: 16rpx auto 0;
+}
+.mkt-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0 8rpx;
+}
+.mkt-sheet-title { font-size: 31rpx; font-weight: 700; color: var(--ink); }
+.mkt-sheet-close {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16rpx;
+  background: var(--surface-2);
+}
+.mkt-sheet-material {
+  padding: 18rpx 20rpx;
+  background: var(--brand-soft);
+  border-radius: 16rpx;
+  margin-bottom: 22rpx;
+}
+.mkt-sheet-material-name { font-size: 26rpx; font-weight: 700; color: var(--brand-ink); }
+.mkt-sheet-material-spec { margin-top: 2rpx; font-size: 22rpx; color: var(--ink-3); }
+.mkt-sheet-field { margin-bottom: 20rpx; }
+.mkt-sheet-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  height: 84rpx;
+  padding: 0 24rpx;
+  background: var(--surface-2);
+  border-radius: 16rpx;
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--ink);
+}
+.mkt-sheet-picker.is-placeholder { color: var(--ink-4); font-weight: 500; }
+.mkt-sheet-price {
+  height: 84rpx;
+  padding: 0 24rpx;
+  background: var(--surface-2);
+  border-radius: 16rpx;
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--ink);
+}
+.mkt-sheet-hint {
+  margin-top: 10rpx;
+  font-size: 21rpx;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+.mkt-sheet-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 28rpx;
+}
+.mkt-sheet-cancel { flex: 1; }
+.mkt-sheet-confirm { flex: 1.4; }

@@ -1,0 +1,460 @@
+<!-- 智能助理聊天页：豆包风格对话流 + 四类业务卡片 + 底部输入器 -->
+<block wx:if="{{activeTab==='workspace'}}">
+
+  <!-- 尚未创建项目 / 批次的引导态 -->
+  <view wx:if="{{!currentProject || !currentBatch}}" class="ws-onboard" style="top:{{navHeight}}px">
+    <view class="ws-onboard-glow"></view>
+    <view class="ws-onboard-icon">
+      <xicon name="sparkle" size="64" color="#4a6cf7" />
+    </view>
+    <view class="ws-onboard-title">{{currentProject ? '创建第一个业务批次' : '从一个项目开始'}}</view>
+    <view class="ws-onboard-sub">
+      {{currentProject ? '批次用于归集同一组采购、送货、付款和开票资料，AI 会自动完成对账。' : '创建项目和首批后，AI 才能准确识别并归档你的业务资料。'}}
+    </view>
+    <view wx:if="{{currentProject}}" class="btn btn-primary ws-onboard-btn" bindtap="openCreateBatch">
+      <xicon name="plus" size="34" color="#ffffff" stroke="{{2}}" />新建批次
+    </view>
+    <view wx:else class="btn btn-primary ws-onboard-btn" bindtap="openCreateProject">
+      <xicon name="plus" size="34" color="#ffffff" stroke="{{2}}" />新建项目
+    </view>
+  </view>
+
+  <!-- 对话流 -->
+  <block wx:else>
+  <scroll-view
+    class="chat-scroll"
+    style="{{workspaceScrollStyle}}"
+    scroll-y
+    scroll-into-view="{{scrollIntoView}}"
+    scroll-with-animation
+    refresher-enabled
+    refresher-triggered="{{refreshing}}"
+    bindrefresherrefresh="refreshAll"
+  >
+    <view class="chat-list" id="chat-start">
+
+      <!-- 欢迎语 -->
+      <view wx:if="{{messages.length === 0}}" class="msg msg-ai fade-in">
+        <view class="msg-avatar"><xicon name="robot" size="40" color="#4a6cf7" /></view>
+        <view class="msg-stack">
+          <view class="bubble bubble-ai">
+            请上传业务资料，或直接输入收付款等信息。
+          </view>
+          <view class="msg-time">刚刚</view>
+        </view>
+      </view>
+
+      <!-- 消息列表 -->
+      <block wx:for="{{messages}}" wx:key="id">
+        <view id="msg-{{index}}" class="msg {{item.isUser ? 'msg-user' : 'msg-ai'}} fade-in">
+          <view wx:if="{{!item.isUser}}" class="msg-avatar"><xicon name="robot" size="40" color="#4a6cf7" /></view>
+          <view class="msg-stack">
+
+            <!-- 文件气泡 -->
+            <view wx:if="{{item.isFile}}" class="bubble {{item.isUser ? 'bubble-user' : 'bubble-ai'}} bubble-file">
+              <view class="file-chip">
+                <view class="file-chip-ico"><xicon name="file" size="34" color="{{item.isUser ? '#ffffff' : '#4a6cf7'}}" /></view>
+                <view class="file-chip-copy">
+                  <view class="file-chip-name text-ellipsis">{{item.fileName || item.content}}</view>
+                  <view class="file-chip-sub">已发送到当前批次</view>
+                </view>
+              </view>
+              <view wx:if="{{item.payload.guidanceText}}" class="file-chip-guide">处理说明：{{item.payload.guidanceText}}</view>
+            </view>
+            <!-- 文本气泡 -->
+            <view wx:else class="bubble {{item.isUser ? 'bubble-user' : 'bubble-ai'}} {{item.failed ? 'bubble-failed' : ''}}">{{item.content}}</view>
+
+            <!-- 单据识别卡片（对齐 Web DocumentReviewCard） -->
+            <view wx:if="{{item.isDocumentCard}}" class="doc-card fade-in">
+              <view class="doc-head">
+                <view class="doc-head-ico tint-{{item.payload.document.typeTone}}"><xicon name="{{item.payload.document.typeIcon}}" size="32" color="currentColor" /></view>
+                <view class="doc-head-text">
+                  <view class="doc-head-title">{{item.payload.headingTitle}}</view>
+                  <view class="doc-head-sub">{{item.payload.headingSub}}</view>
+                </view>
+                <view class="badge tint-{{item.payload.statusTone}}"><view class="badge-dot"></view>{{item.payload.statusText}}</view>
+              </view>
+
+              <view class="doc-body">
+                <!-- 用户处理说明 -->
+                <view wx:if="{{item.payload.document.guidanceText}}" class="doc-guidance">
+                  <text>用户处理说明</text>
+                  <view>{{item.payload.document.guidanceText}}</view>
+                </view>
+
+                <!-- 字段网格 -->
+                <view class="doc-grid">
+                  <view class="doc-cell"><text>{{item.payload.document.partyLabel}}</text><view class="text-ellipsis">{{item.payload.document.supplierName || '待补充'}}</view></view>
+                  <view class="doc-cell"><text>{{item.payload.document.codeLabel}}</text><view class="text-ellipsis">{{item.payload.document.docCode || '未识别'}}</view></view>
+                  <view class="doc-cell"><text>{{item.payload.document.dateLabel}}</text><view>{{item.payload.document.docDate ? item.payload.document.dateText : '待补充'}}</view></view>
+                  <view class="doc-cell"><text>{{item.payload.document.amountLabel}}</text><view class="doc-cell-hl">{{item.payload.document.amountText}}</view></view>
+                  <block wx:if="{{item.payload.isFinancial}}">
+                    <view class="doc-cell"><text>{{item.payload.financeLabel}}</text><view>{{item.payload.expenseCategoryLabel}}</view></view>
+                    <view wx:if="{{item.payload.isInvoice}}" class="doc-cell"><text>税率</text><view>{{item.payload.taxRateText}}</view></view>
+                    <view wx:if="{{item.payload.isInvoice && item.payload.netAmountText}}" class="doc-cell"><text>不含税金额</text><view>{{item.payload.netAmountText}}</view></view>
+                    <view wx:if="{{item.payload.isInvoice && item.payload.taxAmountText}}" class="doc-cell"><text>税额</text><view>{{item.payload.taxAmountText}}</view></view>
+                    <view wx:if="{{item.payload.isInvoice && item.payload.sellerNameText}}" class="doc-cell"><text>销售方</text><view class="text-ellipsis">{{item.payload.sellerNameText}}</view></view>
+                    <view wx:if="{{item.payload.isInvoice && item.payload.buyerNameText}}" class="doc-cell"><text>购买方</text><view class="text-ellipsis">{{item.payload.buyerNameText}}</view></view>
+                  </block>
+                  <block wx:if="{{item.payload.isDelivery}}">
+                    <view class="doc-cell"><text>采购运费</text><view>{{item.payload.freightText || '未标注（无则不计）'}}</view></view>
+                    <view class="doc-cell"><text>销售运费</text><view>{{item.payload.salesFreightText || '未标注（无则不计）'}}</view></view>
+                    <view class="doc-cell"><text>承运单位</text><view class="text-ellipsis">{{item.payload.carrierNameText || '未标注'}}</view></view>
+                    <view wx:if="{{item.payload.pricingNoteText}}" class="doc-cell"><text>销售定价</text><view>{{item.payload.pricingNoteText}}</view></view>
+                    <view wx:if="{{item.payload.vehicleNoText}}" class="doc-cell"><text>送货车牌</text><view>{{item.payload.vehicleNoText}}</view></view>
+                  </block>
+                  <block wx:if="{{item.payload.isPaymentRequest && item.payload.remarkText}}">
+                    <view class="doc-cell doc-cell-full"><text>备注 / 用途</text><view>{{item.payload.remarkText}}</view></view>
+                  </block>
+                </view>
+
+                <!-- 材料明细表 -->
+                <view wx:if="{{item.payload.document.supportsItems && item.payload.document.items.length}}" class="doc-mat">
+                  <scroll-view scroll-x enhanced show-scrollbar="{{false}}" class="doc-mat-scroll">
+                    <view class="doc-mat-table">
+                      <view class="doc-mat-row doc-mat-head">
+                        <text class="c1">材料</text><text class="c2">规格</text><text class="c3">件数</text><text class="c4">总重量</text><text class="c5">计价数量</text><text class="c6">计价单价</text><text class="c7">金额</text>
+                      </view>
+                      <view wx:for="{{item.payload.document.items}}" wx:for-item="line" wx:key="id" class="doc-mat-row">
+                        <text class="c1 text-ellipsis">{{line.materialName}}</text>
+                        <text class="c2 text-ellipsis">{{line.spec}}</text>
+                        <text class="c3">{{line.packageText}}</text>
+                        <text class="c4">{{line.weightText}}</text>
+                        <text class="c5">{{line.quantityText}}</text>
+                        <text class="c6">{{line.priceText}}</text>
+                        <text class="c7">{{line.amountText}}</text>
+                      </view>
+                    </view>
+                  </scroll-view>
+                </view>
+
+                <!-- 金额差异 -->
+                <view wx:if="{{item.payload.amountDiscrepancy && !item.payload.amountDiscrepancy.decision}}" class="discrepancy">
+                  <view class="discrepancy-head"><xicon name="warning" size="26" color="#c8781f" />单据总额与材料明细合计不一致</view>
+                  <view class="discrepancy-grid">
+                    <view class="mini-field"><text>单据总额</text><view>{{item.payload.amountDiscrepancy.sourceAmountText}}</view></view>
+                    <view class="mini-field"><text>明细合计</text><view>{{item.payload.amountDiscrepancy.itemTotalText}}</view></view>
+                    <view class="mini-field"><text>差额</text><view class="tone-red">{{item.payload.amountDiscrepancy.differenceText}}</view></view>
+                  </view>
+                  <view class="doc-actions">
+                    <view class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-decision="keep_source" catchtap="resolveAmountMismatch">保留总额并登记差异</view>
+                    <view class="btn btn-primary card-btn" data-id="{{item.payload.document.id}}" data-decision="sync_items" catchtap="resolveAmountMismatch">同步为明细合计</view>
+                  </view>
+                </view>
+
+                <!-- 发票方向 / 结算归属聚焦确认（对齐 Web focused-confirmation） -->
+                <view wx:if="{{item.payload.needsFocusConfirm}}" class="focus-confirm">
+                  <view class="focus-confirm-copy">
+                    <view class="focus-confirm-title">{{item.payload.focusTitle}}</view>
+                    <view class="focus-confirm-sub">{{item.payload.focusSub}}</view>
+                  </view>
+                  <view class="doc-actions">
+                    <block wx:if="{{item.payload.document.docType==='invoice_unknown'}}">
+                      <view class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="purchase_invoice" catchtap="resolveFocusType">本单位购买，进项发票</view>
+                      <view class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="sales_invoice" catchtap="resolveFocusType">本单位销售，销项发票</view>
+                    </block>
+                    <block wx:else>
+                      <view class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="sales_settlement" catchtap="resolveFocusType">作为销售结算资料</view>
+                      <view class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="evidence_only" catchtap="resolveFocusType">仅作原始凭证</view>
+                    </block>
+                  </view>
+                </view>
+
+                <!-- 已定向发票仍可切换方向（对齐 Web focused-confirmation 二次确认块） -->
+                <view wx:if="{{item.payload.isInvoiceDirected}}" class="focus-confirm">
+                  <view class="focus-confirm-copy">
+                    <view class="focus-confirm-title">发票方向：{{item.payload.document.docType==='sales_invoice' ? '销项发票' : '进项发票'}}</view>
+                    <view class="focus-confirm-sub">系统已按「本单位是销售方还是购买方」判定；若与实际不符，可直接切换。</view>
+                  </view>
+                  <view class="doc-actions">
+                    <view wx:if="{{item.payload.document.docType !== 'purchase_invoice'}}" class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="purchase_invoice" catchtap="resolveFocusType">本单位购买，进项发票</view>
+                    <view wx:if="{{item.payload.document.docType !== 'sales_invoice'}}" class="btn btn-ghost card-btn" data-id="{{item.payload.document.id}}" data-type="sales_invoice" catchtap="resolveFocusType">本单位销售，销项发票</view>
+                  </view>
+                </view>
+
+                <!-- 缺失字段提示 -->
+                <view wx:if="{{item.payload.hasMissingFields}}" class="doc-missing">
+                  <xicon name="warning" size="24" color="#c8781f" />还需补充：{{item.payload.missingFieldText}}
+                </view>
+
+                <!-- 底部说明 -->
+                <view class="doc-note"><xicon name="warning" size="22" color="#9aa0b0" />{{item.payload.noteText}}</view>
+
+                <!-- 动作 -->
+                <view wx:if="{{item.payload.locked}}" class="doc-actions">
+                  <view class="btn btn-ghost card-btn card-btn-block" data-id="{{item.payload.document.id}}" catchtap="openDocument"><xicon name="check" size="26" color="#0f8f52" />{{item.payload.confirmLabel}} · 查看入库数据</view>
+                </view>
+                <view wx:else class="doc-actions">
+                  <view class="btn btn-primary card-btn {{(!item.payload.canConfirm || busy) ? 'is-disabled' : ''}}" data-id="{{item.payload.document.id}}" catchtap="confirmCard"><xicon name="check" size="26" color="#ffffff" stroke="{{2}}" />{{item.payload.confirmLabel}}</view>
+                  <view class="btn btn-warn card-btn" data-id="{{item.payload.document.id}}" catchtap="openDocument"><xicon name="edit" size="26" color="#c8781f" />修改识别字段</view>
+                </view>
+              </view>
+            </view>
+
+            <!-- 重复单据卡片（对齐 Web DuplicateReviewCard） -->
+            <view wx:if="{{item.isDuplicateCard}}" class="doc-card fade-in">
+              <view class="doc-head">
+                <view class="doc-head-ico tint-orange"><xicon name="warning" size="32" color="currentColor" /></view>
+                <view class="doc-head-text">
+                  <view class="doc-head-title">发现疑似重复单据</view>
+                  <view class="doc-head-sub">{{item.payload.reasonText}}，系统不会自动写入台账。</view>
+                </view>
+                <view class="badge {{item.payload.locked ? 'tint-green' : 'tint-orange'}}"><view class="badge-dot"></view>{{item.payload.locked ? '已归档' : '等待选择'}}</view>
+              </view>
+              <view class="doc-body">
+                <view class="dup-compare">
+                  <view class="dup-side">
+                    <text>本次导入</text>
+                    <view class="text-ellipsis">{{item.payload.document.fileName || item.payload.document.docCode || '当前单据'}}</view>
+                    <text class="dup-side-amount">{{item.payload.document.amountText}}</text>
+                  </view>
+                  <view class="dup-arrow"><xicon name="chevronRight" size="30" color="#b4b9c6" /></view>
+                  <view class="dup-side">
+                    <text>已有单据</text>
+                    <view class="text-ellipsis">{{item.payload.existingDocument.fileName || item.payload.existingDocument.docCode || '历史单据'}}</view>
+                    <text class="dup-side-amount">{{item.payload.existingDocument.amountText || '-'}}</text>
+                  </view>
+                </view>
+                <view class="doc-note"><xicon name="warning" size="22" color="#9aa0b0" />文件名相同只是弱证据；文件哈希相同是完全重复；业务内容相同也可能是两次真实采购，最终由你确认。</view>
+                <view class="doc-actions">
+                  <view class="btn btn-ghost card-btn {{item.payload.locked ? 'is-disabled' : ''}}" data-id="{{item.payload.document.id}}" data-decision="skip" catchtap="duplicateDecision">视为重复，不再导入</view>
+                  <view class="btn btn-primary card-btn {{item.payload.locked ? 'is-disabled' : ''}}" data-id="{{item.payload.document.id}}" data-decision="continue" catchtap="duplicateDecision">仍作为新单据导入</view>
+                </view>
+              </view>
+            </view>
+
+            <!-- 操作结果卡片（对齐 Web OperationResultCard） -->
+            <view wx:if="{{item.isOperationCard}}" class="op-card fade-in">
+              <view class="op-head">
+                <view class="op-check"><xicon name="check" size="30" color="#ffffff" stroke="{{2.4}}" /></view>
+                <view class="op-head-text">
+                  <view class="op-summary">{{item.payload.summary}}</view>
+                  <view class="op-sub">本次操作对应以下业务资料</view>
+                </view>
+              </view>
+              <view class="op-ref">
+                <view class="op-ref-cell">
+                  <text>{{item.payload.operationReference.docTypeLabel}}</text>
+                  <view class="text-ellipsis">{{item.payload.operationReference.docCode || item.payload.operationReference.fileName || '未编号资料'}}</view>
+                </view>
+                <view class="op-ref-cell op-ref-right">
+                  <text>{{item.payload.operationReference.supplierName || '未标注往来单位'}}</text>
+                  <view class="op-ref-amt">{{item.payload.operationReference.amountText}}</view>
+                </view>
+              </view>
+            </view>
+
+            <!-- 澄清确认卡片（对齐 Web ClarificationCard：可直连复用原附件） -->
+            <view wx:if="{{item.isClarificationCard}}" class="doc-card fade-in">
+              <view class="doc-head">
+                <view class="doc-head-ico tint-orange"><xicon name="question" size="32" color="currentColor" /></view>
+                <view class="doc-head-text">
+                  <view class="doc-head-title">需要你确认处理意图</view>
+                  <view class="doc-head-sub">{{item.payload.clarifyAnswered ? '该问题已回复，原始资料仍然保留，可继续补充。' : (item.payload.clarifyDocumentId ? '已保留原始资料，选择后无需重新上传。' : '用户说明与单据内容存在冲突时，AI 不会直接写入台账。')}}</view>
+                </view>
+                <view class="badge {{item.payload.clarifyAnswered ? 'tint-green' : 'tint-orange'}}"><view class="badge-dot"></view>{{item.payload.clarifyAnswered ? '已回复' : '待回复'}}</view>
+              </view>
+              <view class="doc-body">
+                <view class="clarify-q">{{item.payload.question || item.content}}</view>
+                <view wx:if="{{item.payload.requestedType || item.payload.detectedType}}" class="clarify-conflict">
+                  <view><text>你的说明</text><text class="clarify-conflict-val">{{item.payload.requestedType || '-'}}</text></view>
+                  <view><text>内容识别</text><text class="clarify-conflict-val">{{item.payload.detectedType || '-'}}</text></view>
+                </view>
+                <view wx:if="{{item.payload.clarifyDocumentId}}" class="doc-actions doc-actions-col">
+                  <view
+                    wx:for="{{item.payload.options}}"
+                    wx:key="*this"
+                    wx:for-item="answer"
+                    class="btn btn-ghost card-btn card-btn-block {{item.payload.clarifyAnswered || busy ? 'is-disabled' : ''}}"
+                    data-answer="{{answer}}"
+                    data-doc-id="{{item.payload.clarifyDocumentId}}"
+                    data-msg-id="{{item.id}}"
+                    catchtap="chooseClarification"
+                  >{{answer}}</view>
+                </view>
+                <view wx:else class="doc-actions doc-actions-col">
+                  <view class="btn btn-primary card-btn card-btn-block {{busy ? 'is-disabled' : ''}}" catchtap="openAttachmentMenu">重新上传资料并说明</view>
+                </view>
+              </view>
+            </view>
+
+            <!-- 对账单导出卡片（对齐 Web ReconciliationExportCard：日期可改，汇总实时刷新） -->
+            <view wx:if="{{item.isReconciliationCard}}" class="doc-card fade-in">
+              <view class="doc-head">
+                <view class="doc-head-ico tint-blue"><xicon name="bill" size="32" color="currentColor" /></view>
+                <view class="doc-head-text">
+                  <view class="doc-head-title">{{item.payload.source === 'weekly' ? '每周对账提醒' : item.payload.source === 'user_reminder' ? '预约的对账单' : '对账单导出'}}</view>
+                  <view class="doc-head-sub">{{item.payload.reconSummaryText || '按送货单日期取明细，累计数据自动统计至结束日'}}</view>
+                </view>
+              </view>
+              <view class="doc-body">
+                <view class="recon-form">
+                  <picker mode="date" value="{{item.payload.reconStart}}" data-msg-id="{{item.id}}" data-field="start" bindchange="updateReconRange">
+                    <view class="recon-form-field"><text>开始日期</text><view>{{item.payload.reconStart}}</view></view>
+                  </picker>
+                  <picker mode="date" value="{{item.payload.reconEnd}}" data-msg-id="{{item.id}}" data-field="end" bindchange="updateReconRange">
+                    <view class="recon-form-field"><text>结束日期</text><view>{{item.payload.reconEnd}}</view></view>
+                  </picker>
+                </view>
+                <view wx:if="{{item.payload.reconError}}" class="doc-missing">{{item.payload.reconError}}</view>
+                <view class="doc-actions">
+                  <view
+                    class="btn btn-primary card-btn card-btn-block {{item.payload.reconDownloading ? 'is-disabled' : ''}}"
+                    data-msg-id="{{item.id}}"
+                    catchtap="downloadReconciliation"
+                  ><xicon name="download" size="26" color="#ffffff" />{{item.payload.reconDownloading ? '正在导出...' : '下载对账单'}}</view>
+                </view>
+              </view>
+            </view>
+
+            <view class="msg-meta">
+              <view class="msg-time {{item.failed ? 'tone-red' : ''}}">{{item.failed ? '发送失败，请重试或删除' : item.timeText}}</view>
+              <view wx:if="{{!item.isUser && item.creditsUsed > 0}}" class="msg-credits">本次消耗积分 {{item.creditsUsed}}</view>
+            </view>
+            <view wx:if="{{item.failed}}" class="msg-failed-actions">
+              <view class="msg-failed-btn" data-id="{{item.id}}" catchtap="retryFailedMessage">重试</view>
+              <view class="msg-failed-btn is-ghost" data-id="{{item.id}}" catchtap="deleteFailedMessage">删除</view>
+            </view>
+          </view>
+          <view wx:if="{{item.isUser}}" class="msg-avatar msg-avatar-user">{{userInitial}}</view>
+        </view>
+      </block>
+
+      <!-- 处理中 -->
+      <view wx:if="{{busy}}" class="msg msg-ai fade-in">
+        <view class="msg-avatar"><xicon name="robot" size="40" color="#4a6cf7" /></view>
+        <view class="msg-stack">
+          <view class="processing">
+            <view class="processing-copy">
+              <view>正在处理业务资料</view>
+              <text>读取文件、识别字段并生成确认卡片…</text>
+            </view>
+            <view class="typing"><view class="typing-dot"></view><view class="typing-dot"></view><view class="typing-dot"></view></view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{error}}" class="chat-error"><xicon name="warning" size="28" color="#d23a3a" />{{error}}</view>
+
+      <!-- 当前建议：跟随消息流置于最底部（最新位置），对齐 Web 侧边栏下一步建议；默认显示第一条，下方可展开 -->
+      <view class="next-steps fade-in" id="next-steps">
+        <view class="next-steps-head">
+          <view class="next-steps-head-left">
+            <view class="next-steps-head-title">当前建议</view>
+            <view class="next-steps-head-ico"><xicon name="sparkle" size="26" color="#2f66f6" /></view>
+          </view>
+          <view class="next-steps-head-actions">
+            <view wx:if="{{nextSteps.length}}" class="next-steps-count">{{nextSteps.length}}</view>
+            <view wx:if="{{nextSteps.length > 1}}" class="next-steps-toggle" bindtap="toggleNextSteps" hover-class="next-steps-toggle-hover">
+              <xicon name="{{nextStepsOpen ? 'chevronUp' : 'chevronDown'}}" size="26" color="#2f66f6" />
+            </view>
+          </view>
+        </view>
+
+        <block wx:if="{{nextSteps.length}}">
+          <view class="next-steps-label">按当前批次进度</view>
+          <!-- 第一条始终显示 -->
+          <view
+            class="next-step-row"
+            data-key="{{nextSteps[0].key}}"
+            bindtap="prepareNextStep"
+            hover-class="next-step-row-hover"
+          >
+            <view class="next-step-row-ico"><xicon name="{{nextSteps[0].icon}}" size="30" color="#2f66f6" /></view>
+            <view class="next-step-row-copy">
+              <view class="next-step-row-title">{{nextSteps[0].title}}</view>
+              <view class="next-step-row-detail text-ellipsis">{{nextSteps[0].detail}}</view>
+            </view>
+            <xicon class="next-step-row-go" name="chevronRight" size="26" color="#b4b9c6" />
+          </view>
+          <!-- 其余可展开 -->
+          <block wx:if="{{nextStepsOpen}}">
+            <view
+              wx:for="{{nextStepsRest}}"
+              wx:key="key"
+              class="next-step-row"
+              data-key="{{item.key}}"
+              bindtap="prepareNextStep"
+              hover-class="next-step-row-hover"
+            >
+              <view class="next-step-row-ico"><xicon name="{{item.icon}}" size="30" color="#2f66f6" /></view>
+              <view class="next-step-row-copy">
+                <view class="next-step-row-title">{{item.title}}</view>
+                <view class="next-step-row-detail text-ellipsis">{{item.detail}}</view>
+              </view>
+              <xicon class="next-step-row-go" name="chevronRight" size="26" color="#b4b9c6" />
+            </view>
+          </block>
+          <!-- 展开 / 收起 -->
+          <view wx:if="{{nextSteps.length > 1}}" class="next-steps-more" bindtap="toggleNextSteps" hover-class="next-steps-more-hover">
+            <text>{{nextStepsOpen ? '收起' : '展开剩余 ' + (nextSteps.length - 1) + ' 项'}}</text>
+            <xicon name="{{nextStepsOpen ? 'chevronUp' : 'chevronDown'}}" size="22" color="#9aa0ad" />
+          </view>
+        </block>
+        <view wx:else class="next-steps-empty">
+          <xicon name="check" size="34" color="#16b26a" />
+          <text class="next-steps-empty-text">当前批次资料已齐全，无待补充项</text>
+        </view>
+        <view class="next-steps-foot" data-key="ledger" bindtap="setTab" hover-class="next-steps-foot-hover">
+          <view class="next-steps-foot-ico"><xicon name="records" size="30" color="#2f66f6" /></view>
+          <view class="next-steps-foot-copy">
+            <text class="next-steps-foot-title">查看批次台账</text>
+            <text class="next-steps-foot-sub">{{stats.pendingCount ? stats.pendingCount + ' 项待确认，确认后自动更新' : '全部已确认'}}</text>
+          </view>
+          <xicon name="chevronRight" size="24" color="#9aa0ad" />
+        </view>
+      </view>
+      <view id="list-end" class="list-end"></view>
+    </view>
+  </scroll-view>
+
+  </block>
+
+  <!-- 底部输入器（豆包风格） -->
+  <view wx:if="{{currentProject && currentBatch}}" class="composer-wrap" style="{{composerStyle}}">
+    <!-- 待发送附件预览 -->
+    <view wx:if="{{pendingFile}}" class="composer-attach">
+      <view class="attach-card" bindtap="previewPendingFile">
+        <view class="attach-ico tint-blue"><xicon name="{{pendingFile.kind === 'image' ? 'photo' : pendingFile.kind === 'excel' ? 'records' : 'file'}}" size="34" color="currentColor" /></view>
+        <view class="attach-copy">
+          <view class="attach-name text-ellipsis">{{pendingFile.name}}</view>
+          <view class="attach-sub">{{pendingFile.sizeText}} · 可补充说明</view>
+        </view>
+        <view class="attach-remove" catchtap="removePendingFile"><xicon name="close" size="26" color="#8a90a0" stroke="{{2}}" /></view>
+      </view>
+    </view>
+
+    <!-- 快捷操作胶囊 -->
+    <scroll-view class="quick-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="quick-row">
+        <view wx:for="{{quickActions}}" wx:key="key" class="quick-pill" data-key="{{item.key}}" bindtap="quickAction">
+          <xicon name="{{item.icon}}" size="30" color="#4c5160" />{{item.label}}
+        </view>
+      </view>
+    </scroll-view>
+
+    <!-- 输入行（多行自动高度） -->
+    <view class="composer">
+      <view class="composer-tool" bindtap="openAttachmentMenu"><xicon name="plus" size="40" color="#4c5160" stroke="{{2}}" /></view>
+      <view class="composer-field">
+        <textarea
+          class="composer-input"
+          value="{{composerText}}"
+          cursor="{{composerCursor}}"
+          placeholder="{{pendingFile ? '可选：补充处理说明…' : '发消息，或上传图片 / PDF / Excel'}}"
+          placeholder-class="composer-ph"
+          auto-height
+          fixed
+          show-confirm-bar="{{false}}"
+          adjust-position="{{false}}"
+          confirm-type="return"
+          cursor-spacing="16"
+          bindinput="updateComposer"
+          bindconfirm="insertNewline"
+          bindkeyboardheightchange="onKeyboardHeight"
+        ></textarea>
+      </view>
+      <view class="composer-send {{canSend && !busy ? 'is-active' : ''}}" bindtap="sendMessage"><xicon name="send" size="34" color="#ffffff" stroke="{{2}}" /></view>
+    </view>
+  </view>
+</block>

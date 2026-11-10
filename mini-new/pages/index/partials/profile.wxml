@@ -1,0 +1,100 @@
+<!-- 个人中心：本单位身份与账号 -->
+<scroll-view
+  wx:if="{{activeTab==='profile'}}"
+  class="page-scroll"
+  style="{{pageScrollStyle}}"
+  scroll-y
+>
+  <view class="page-inner">
+    <!-- 用户名片 -->
+    <view class="profile-hero card">
+      <view class="profile-avatar">{{userInitial}}</view>
+      <view class="profile-copy">
+        <view class="profile-name text-ellipsis">{{user.nickname || '微信用户'}}</view>
+        <view class="profile-role">{{user.roleName || '采购协作成员'}}</view>
+        <view class="profile-company text-ellipsis">{{user.companyName || '尚未设置本单位身份'}}</view>
+      </view>
+      <view class="profile-state {{profileOverview.companyReady ? 'tint-green' : 'tint-orange'}}">
+        {{profileOverview.companyReady ? '企业身份已完善' : '待完善企业身份'}}
+      </view>
+    </view>
+
+    <!-- 积分余额卡片 -->
+    <view class="profile-credit card" bindtap="openBilling" hover-class="menu-item-hover">
+      <view class="profile-credit-main">
+        <view class="profile-credit-label">本月剩余积分</view>
+        <view class="profile-credit-value">{{billing.balance}}<text class="profile-credit-unit"> / {{billing.monthlyQuota}}</text></view>
+      </view>
+      <view class="profile-credit-side">
+        <view class="profile-credit-used">本月已用 {{billing.usedThisMonth}}</view>
+        <view class="profile-credit-refresh" wx:if="{{billing.periodEnd}}">{{billing.periodEnd}} 刷新</view>
+      </view>
+      <xicon name="chevronRight" size="30" color="#b4b9c6" />
+    </view>
+
+    <!-- 单位名称设置（原系统设置中的本单位身份逻辑）+ 每周对账提醒 -->
+    <view class="settings-label">企业设置</view>
+    <view class="menu-list card">
+      <view class="menu-item" bindtap="openCompanySettings" hover-class="menu-item-hover">
+        <view class="menu-icon tint-blue"><xicon name="settings" size="34" color="currentColor" /></view>
+        <view class="menu-copy">
+          <view class="menu-copy-title">本单位身份</view>
+          <view class="menu-copy-sub">{{user.companyName || '填写发票抬头或企业全称，用于判断进销项方向'}}</view>
+        </view>
+        <xicon name="chevronRight" size="30" color="#b4b9c6" />
+      </view>
+      <view class="menu-item" bindtap="openReminderSettings" hover-class="menu-item-hover">
+        <view class="menu-icon tint-blue"><xicon name="clock" size="34" color="currentColor" /></view>
+        <view class="menu-copy">
+          <view class="menu-copy-title">每周对账提醒</view>
+          <view class="menu-copy-sub">{{reminderLabel}}</view>
+        </view>
+        <xicon name="chevronRight" size="30" color="#b4b9c6" />
+      </view>
+    </view>
+
+    <view class="btn btn-danger profile-logout" bindtap="logout">
+      <xicon name="logout" size="32" color="#ef4d4d" />退出登录
+    </view>
+  </view>
+</scroll-view>
+
+<!-- 积分消费明细弹层 -->
+<view wx:if="{{billingOpen}}" class="billing-mask" bindtap="closeBilling">
+  <view class="billing-sheet" catchtap="noop">
+    <view class="billing-sheet-head">
+      <view class="billing-sheet-title">积分与消费明细</view>
+      <view class="billing-sheet-close" bindtap="closeBilling"><xicon name="close" size="34" color="#9aa0b0" /></view>
+    </view>
+    <view wx:if="{{billingLoading}}" class="billing-loading">加载中…</view>
+    <block wx:else>
+      <view class="billing-summary">
+        <view class="billing-stat">
+          <view class="billing-stat-label">剩余</view>
+          <view class="billing-stat-value">{{billing.balance}}</view>
+        </view>
+        <view class="billing-stat">
+          <view class="billing-stat-label">本月已用</view>
+          <view class="billing-stat-value">{{billing.usedThisMonth}}</view>
+        </view>
+        <view class="billing-stat">
+          <view class="billing-stat-label">月配额</view>
+          <view class="billing-stat-value">{{billing.monthlyQuota}}</view>
+        </view>
+      </view>
+      <view class="billing-logs-title">消费记录</view>
+      <scroll-view scroll-y class="billing-logs">
+        <view wx:if="{{billingLogs.length === 0}}" class="billing-empty">暂无消费记录</view>
+        <view wx:for="{{billingLogs}}" wx:key="id" class="billing-log-row">
+          <view class="billing-log-row-top">
+            <text class="billing-log-type">{{item.businessType === 'market_match' ? '行情匹配' : '智能助理'}}</text>
+            <text class="billing-log-cost">-{{item.costCredits}}</text>
+          </view>
+          <view class="billing-log-row-sub">
+            <text wx:if="{{item.createdAt}}">{{item.createdAt}}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </block>
+  </view>
+</view>

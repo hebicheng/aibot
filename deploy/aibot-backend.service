@@ -1,0 +1,17 @@
+[Unit]
+Description=AI-BOT Backend (purchase-ai-bot)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aibot
+# 密钥/数据库等敏感配置放服务器本地文件，不进仓库（模板见 deploy/aibot.env.example）
+EnvironmentFile=-/opt/aibot/.env
+ExecStart=/usr/bin/java -Duser.timezone=Asia/Shanghai -jar /opt/aibot/app.jar
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
