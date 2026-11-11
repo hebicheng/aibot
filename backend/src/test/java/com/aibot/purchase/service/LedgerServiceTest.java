@@ -3,6 +3,8 @@ package com.aibot.purchase.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,6 +43,7 @@ class LedgerServiceTest {
   @Mock private ProjectMapper projectMapper;
   @Mock private BatchHintService batchHintService;
   @Mock private com.aibot.purchase.service.market.PurchaseSalePriceService salePriceService;
+  @Mock private FreightService freightService;
 
   private LedgerService service;
 
@@ -55,8 +58,12 @@ class LedgerServiceTest {
         projectMapper,
         new ObjectMapper(),
         batchHintService,
-        salePriceService
+        salePriceService,
+        freightService
     );
+    // 运费行由 FreightService 维护：单测里默认没有运费
+    lenient().when(freightService.sum(anyString(), anyString())).thenReturn(BigDecimal.ZERO);
+    lenient().when(freightService.list(anyString(), any())).thenReturn(List.of());
   }
 
   @Test

@@ -443,10 +443,11 @@ public class ChatAiService {
             用户提示里给出的当前日期和当前时间换算（"10分钟后"= 当前时间加10分钟，必须精确，
             不得凭空猜测当前时间），精确到分钟即可；没说未来时间就填 null（系统立即给出可下载卡片）。
             「每周/每月」等周期性导出说法按无 triggerAt 处理（triggerAt=null，系统另有周期提醒配置）。
-        25. 用户提示里的【本批次默认口径】只是送货单字段的默认值（采购运费 transportFee、
-            销售运费 salesFreight、销售定价 pricingMode/upliftAmount/marginRate）：
-            - 仅当用户处理说明和单据内容都没有提及对应内容时，才按默认口径填补空缺；
-              提到了的一律以单据/说明为准，禁止用默认口径覆盖。
+        25. 用户提示里的【本批次默认口径】只用于**销售定价**推断（pricingMode/upliftAmount/marginRate）：
+            - 仅当用户处理说明和单据内容都没有提及定价时才按默认口径推断，提到了以单据/说明为准；
+            - 运费口径（采购运费/销售运费）由系统按批次口径独立生成运费行，
+              **禁止**据此刻意填写、补全或推算 transportFee / salesFreight；
+              这两个字段只在单据上真实写明运费时才抽取，单据没写就留 null。
             - 默认口径不构成任何类型判断依据，不得据此把资料改判为送货单/运输单，
               也不得据此输出 clarify_card。
             口径含义（回答用户提问时按这个讲，不要自己另算）：
@@ -526,8 +527,9 @@ public class ChatAiService {
       return;
     }
     if (StringUtils.hasText(context.batchHintText())) {
-      sb.append("\n【当前生效的默认口径（批次优先、缺项回退项目；仅适用于送货单；只用来填补 transportFee/salesFreight/")
-        .append("销售定价的空缺，用户处理说明与单据内容已提及的内容不得覆盖；")
+      sb.append("\n【当前生效的默认口径（批次优先、缺项回退项目）：只用于销售定价推断；")
+        .append("运费口径由系统独立生成运费行，禁止据此填写或推算 transportFee/salesFreight，")
+        .append("运费只在单据上真实写明时才抽取；用户处理说明与单据内容已提及的内容不得覆盖；")
         .append("不得据此改判单据类型）】：")
         .append(context.batchHintText()).append("\n");
     }

@@ -48,6 +48,7 @@ public class LedgerService {
   private final ObjectMapper objectMapper;
   private final BatchHintService batchHintService;
   private final PurchaseSalePriceService salePriceService;
+  private final FreightService freightService;
 
   public LedgerService(
       DocumentMapper documentMapper,
@@ -58,7 +59,8 @@ public class LedgerService {
       ProjectMapper projectMapper,
       ObjectMapper objectMapper,
       BatchHintService batchHintService,
-      PurchaseSalePriceService salePriceService
+      PurchaseSalePriceService salePriceService,
+      FreightService freightService
   ) {
     this.documentMapper = documentMapper;
     this.documentItemMapper = documentItemMapper;
@@ -69,6 +71,7 @@ public class LedgerService {
     this.objectMapper = objectMapper;
     this.batchHintService = batchHintService;
     this.salePriceService = salePriceService;
+    this.freightService = freightService;
   }
 
   @Transactional
@@ -144,8 +147,19 @@ public class LedgerService {
     return getLedgerInternal(batchId);
   }
 
-  public List<LedgerRecord> getLedger(String userId, String batchId) {
+  /** 人工改运费行承运单位（按行改，空串=清空），返回刷新后的台账。 */
+  @Transactional
+  public List<LedgerRecord> updateFreightCarriers(
+      String userId,
+      String batchId,
+      Map<String, String> carriers
+  ) {
     requireOwnedBatch(userId, null, batchId);
+    freightService.updateCarriers(batchId, carriers);
+    return decoratePurchaseMargin(decorateMonthlySettlement(getLedgerInternal(batchId)));
+  }
+
+  public List<LedgerRecord> getLedger(String userId, String batchId) {    requireOwnedBatch(userId, null, batchId);
     return decoratePurchaseMargin(decorateMonthlySettlement(getLedgerInternal(batchId)));
   }
 
@@ -344,7 +358,7 @@ public class LedgerService {
     List<DocumentItem> items = getDocumentItems(delivery.getId());
     // 销售金额与确认入账同口径：网价锁定值优先，无锁定记录回退单据金额/明细合计
     record.setSalesAmount(deliveryContributedSales(delivery, items));
-    record.setFreight(deliveryFreightAmount(delivery));
+    // 采购运费不再挂单据：批次运费由 FreightService.rebuild 生成运费行后统一回填（2026-11-11）
     record.setPurchaseAmount(BigDecimal.ZERO);
     record.setMaterial(extractMaterial(delivery));
     applyDeliveryMeasurements(record, items, false);
@@ -550,25 +564,25 @@ public class LedgerService {
   }
 
   /**
-   * 送货单当前贡献口径的销售金额：锁定值优先，无锁定记录回退旧口径
+   * 送货单当前贡献口径的**货款**（不含客户承担的运费）：锁定值优先，无锁定记录回退旧口径
    * （单据总额，缺失时取明细合计）。入账与修正差额重算共用，保证口径一致。
+   *
+   * <p>2026-11-11：运费不再并进这里——销售运费由 FreightService 生成运费行后统一进
+   * {@code ledger_records.sales_amount}（{@link #recalcFreight}），避免「单据运费 + 运费表」两头各算一次。
    */
   public BigDecimal deliveryContributedSales(Document document, List<DocumentItem> items) {
     BigDecimal locked = deliveryLockedSales(document, items);
-    BigDecimal sales;
     if (locked != null) {
-      sales = locked;
-    } else {
-      sales = nz(document.getAmount());
-      if (sales.compareTo(BigDecimal.ZERO) <= 0 && items != null) {
-        sales = items.stream()
-            .map(DocumentItem::getAmount)
-            .map(LedgerService::nz)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-      }
+      return locked;
     }
-    // 销售运费（客户承担）计入销售侧收入：锁定货款/明细合计 + 销售运费
-    return sales.add(nz(document.getSalesFreight()));
+    BigDecimal sales = nz(document.getAmount());
+    if (sales.compareTo(BigDecimal.ZERO) <= 0 && items != null) {
+      return items.stream()
+          .map(DocumentItem::getAmount)
+          .map(LedgerService::nz)
+          .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    return sales;
   }
 
   /**
@@ -880,17 +894,23 @@ public class LedgerService {
       BigDecimal cost,
       BigDecimal amount,
       BigDecimal rate,
-      String note
+      String note,
+      /** 按采购量估算的货款 − 按送货量的实际货款；没有送货单时为 null（无处比较）。 */
+      BigDecimal gap
   ) {}
 
   /**
-   * 批次采购毛利（2026-10-27 起毛利率口径以采购价为基数）：明细行按批次默认口径推算销售单价
-   * （毛利率口径 = 采购吨价 ÷ (1−毛利率)，上浮口径 = 网价 + 上浮）× 计价吨数 = 估算货款；
-   * 采购成本 = 明细采购金额合计 + 采购运费成本（见 {@link #batchFreightCost}），
-   * 毛利额 = 估算货款 + 送货运费 − 采购成本，
-   * 毛利率 = 毛利额 ÷（估算货款 + 送货运费）× 100（总额法，与销售区同口径）。
-   * 只统计能确定吨数、金额并算出销售价的行。
-   * 销售价与运费口径读时按当前批次口径计算——口径修改即时生效，历史采购单无需重算。
+   * 批次采购毛利（2026-10-27 起毛利率口径以采购价为基数）：
+   * 采购成本 = 明细采购金额合计 + 采购运费成本（见 {@link #batchFreightCost}）。
+   *
+   * <p>2026-11-11 改销售口径：<b>以送货数量为准</b>——销售额取已确认送货单的锁定货款合计
+   * （送货单是全局实际重量）；只有一张送货单都还没有时，才退回「采购明细吨数 × 销售单价」估算。
+   * 采购成本同样按送货重量摊：采购单价 × 送货吨数，采购多买未发出的部分不计本批成本。
+   * 采购与送货数量不一致时，收入端的差额体现为 {@code gap}（按采购量的估算 − 实际货款），
+   * 供台账「采购毛利差额」列展示。
+   *
+   * <p>毛利额 = 销售额 + 送货运费 − 采购成本，
+   * 毛利率 = 毛利额 ÷（销售额 + 送货运费）× 100（总额法，与销售区同口径）。
    *
    * <p>返回值不再用 null 表示「算不出」：{@code freight} 与口径无关，永远给；
    * 算不出毛利时 amount/rate 为 null 并带 {@code note} 原因，前端按 note 显示而不是空白。
@@ -907,121 +927,156 @@ public class LedgerService {
         : documentItemMapper.selectList(Wrappers.<DocumentItem>lambdaQuery()
             .in(DocumentItem::getDocumentId, supplies.stream().map(Document::getId).toList())
             .orderByAsc(DocumentItem::getSortOrder));
-    // 运费成本与定价口径正交：没有口径也要算运费，否则运费口径配了却无处显示（2026-11-06）
-    BigDecimal freight = batchFreightCost(batchId, hints, supplyItems);
+    // 运费成本与定价口径正交：没有口径也要算运费（运费行由 FreightService 统一维护，2026-11-11）
+    BigDecimal freight = batchFreightCost(batchId);
     BigDecimal salesFreight = batchSalesFreight(batchId);
-    if (policy == null) {
-      return new PurchaseMargin(null, salesFreight, freight, null, null, null, "no_policy");
+    if (supplyItems.isEmpty()) {
+      return new PurchaseMargin(null, salesFreight, freight, null, null, null, "no_supply", null);
     }
-    if (supplies.isEmpty() || supplyItems.isEmpty()) {
-      return new PurchaseMargin(null, salesFreight, freight, null, null, null, "no_supply");
-    }
-    // 全部采购明细一次载入：销售价按行推算，吨数取计价数量/重量，金额取明细金额。
-    Map<String, PurchaseSalePriceService.Price> prices =
-        salePriceService.pricesFor(supplyItems, policy);
-    BigDecimal sales = BigDecimal.ZERO;
-    BigDecimal purchase = BigDecimal.ZERO;
-    for (DocumentItem item : supplyItems) {
-      BigDecimal tons = salePriceService.pricingTons(item);
-      BigDecimal itemAmount = nz(item.getAmount());
-      PurchaseSalePriceService.Price price = prices.get(item.getId());
-      BigDecimal unit = price == null ? null : price.effective();
-      if (tons == null || tons.signum() <= 0 || unit == null || unit.signum() <= 0
-          || itemAmount.signum() <= 0) {
-        continue;
+    // 采购成本 = 采购单价 × 送货重量（2026-11-11 定）：
+    // 采购与送货数量不一致时，没发出去的货不计入本批成本（留在库存里）；
+    // 一张送货单都没有时才退回采购单金额。
+    BigDecimal purchase = purchaseCostByDeliveredTons(batchId, supplyItems);
+
+    // 销售口径（2026-11-11）：以送货数量为准——实际锁定货款优先；
+    // 一张送货单都还没有时，才退回「采购明细吨数 × 推算销售单价」的估算
+    BigDecimal deliverySales = deliveryGoodsTotal(batchId);
+    BigDecimal estimatedSales = BigDecimal.ZERO;
+    if (policy != null) {
+      Map<String, PurchaseSalePriceService.Price> prices =
+          salePriceService.pricesFor(supplyItems, policy);
+      for (DocumentItem item : supplyItems) {
+        BigDecimal tons = salePriceService.pricingTons(item);
+        BigDecimal itemAmount = nz(item.getAmount());
+        PurchaseSalePriceService.Price price = prices.get(item.getId());
+        BigDecimal unit = price == null ? null : price.effective();
+        if (tons == null || tons.signum() <= 0 || unit == null || unit.signum() <= 0
+            || itemAmount.signum() <= 0) {
+          continue;
+        }
+        estimatedSales = estimatedSales
+            .add(unit.multiply(tons).setScale(2, RoundingMode.HALF_UP));
       }
-      sales = sales.add(unit.multiply(tons).setScale(2, RoundingMode.HALF_UP));
-      purchase = purchase.add(itemAmount);
     }
+    BigDecimal sales = deliverySales.signum() > 0 ? deliverySales : estimatedSales;
+    // 数量差：按采购量估算的货款 − 按送货量的实际货款（没有送货单时无处比较，留空）
+    BigDecimal gap = deliverySales.signum() > 0 && estimatedSales.signum() > 0
+        ? estimatedSales.subtract(deliverySales).setScale(2, RoundingMode.HALF_UP)
+        : null;
     if (sales.signum() <= 0) {
-      // 有采购单但没有一行算得出销售价：多半是明细缺吨数（数量型计价）或缺金额
-      return new PurchaseMargin(null, salesFreight, freight, null, null, null, "no_priced_row");
+      // 有采购单但没有送货销售额也算不出估算（缺定价口径 / 明细缺吨数金额）
+      String note = policy == null ? "no_policy" : "no_priced_row";
+      return new PurchaseMargin(null, salesFreight, freight, null, null, null, note, gap);
     }
     BigDecimal cost = purchase.add(freight);
     BigDecimal amount = sales.add(salesFreight).subtract(cost);
-    // 毛利率 = 毛利 ÷ 总收入，分母 = 估算货款 + 客户承担送货运费（总额法，2026-10-28 定）。
+    // 毛利率 = 毛利 ÷ 总收入，分母 = 销售额 + 客户承担送货运费（总额法，2026-10-28 定）。
     BigDecimal salesTotal = sales.add(salesFreight);
     BigDecimal rate = salesTotal.signum() > 0
         ? amount.multiply(BigDecimal.valueOf(100)).divide(salesTotal, 2, RoundingMode.HALF_UP)
         : BigDecimal.ZERO;
-    return new PurchaseMargin(sales, salesFreight, freight, cost, amount, rate, null);
+    return new PurchaseMargin(sales, salesFreight, freight, cost, amount, rate, null, gap);
   }
 
   /**
-   * 批次客户承担的送货运费（2026-10-28 定，2026-11-06 按趟改包干）：
-   * ① 已确认送货单的 sales_freight 合计（实际值，最准）；
-   * ② 单据实体现值为空（先有单据、后配口径的批次）时按批次销售运费口径推算——
-   *   元/趟 = 整批一趟包干价（这个批次客户付多少就是多少，不乘送货单张数）；
-   *   元/吨 × 吨数（优先实际送货吨数，没有送货单退回采购明细吨数）；
-   * ③ 都没有返回 0（「含运费」口径或未配置销售运费）。
+   * 采购成本 = 采购单价 × 送货重量（2026-11-11 定）。
    *
-   * <p>这笔钱同时进毛利率分子和分母：客户付的运费是实实在在的收入，与货款一起构成总收入；
-   * 我们付的采购运费在成本侧扣。两者相等时运费对毛利率影响归零，差额才体现运费盈亏。
+   * <p>采购明细先按材料行归并成吨价（同一材料多张采购单按吨数加权），
+   * 再用送货明细的吨数乘回去——采购多买、少送的部分不计成本，留在库存。
+   * 送货行找不到对应采购材料时回退整批加权均价；一张送货单都没有时退回采购单金额。
    */
-  private BigDecimal batchSalesFreight(String batchId) {
-    if (!StringUtils.hasText(batchId)) {
-      return BigDecimal.ZERO;
-    }
+  private BigDecimal purchaseCostByDeliveredTons(String batchId, List<DocumentItem> supplyItems) {
+    BigDecimal supplyAmount = supplyItems.stream()
+        .map(DocumentItem::getAmount)
+        .map(LedgerService::nz)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
     List<Document> deliveries = documentMapper.selectList(Wrappers.<Document>lambdaQuery()
         .eq(Document::getBatchId, batchId)
         .eq(Document::getDocType, "delivery_note")
         .in(Document::getStatus, "matched", "archived"));
-    BigDecimal actual = nz(deliveries.stream()
-        .map(Document::getSalesFreight)
-        .map(LedgerService::nz)
-        .reduce(BigDecimal.ZERO, BigDecimal::add));
-    if (actual.signum() > 0) {
-      return actual.setScale(2, RoundingMode.HALF_UP);
+    if (deliveries.isEmpty()) {
+      return supplyAmount;
     }
-    // 单据实体现值为空（先有单据、后配口径的批次）按批次口径推算，与 batchFreightCost 对称：
-    // 元/趟 = 整批一趟包干价（与采购运费同口径，2026-11-06）；元/吨 × 送货明细计价吨数（按实际发货量算）。
-    Map<String, Object> hints = batchHintService.deliveryNoteHints(batchMapper.selectById(batchId));
-    if (hints == null || hints.isEmpty()) {
-      return BigDecimal.ZERO;
-    }
-    BigDecimal perTrip = BatchHintService.decimal(
-        hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TRIP));
-    if (perTrip != null) {
-      // 与采购运费同语义：这个批次这一趟客户付多少钱，就是多少，不乘送货单张数
-      return perTrip.setScale(2, RoundingMode.HALF_UP);
-    }
-    BigDecimal perTon = BatchHintService.decimal(
-        hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TON));
-    if (perTon != null) {
-      // 吨数优先用实际送货量；还没有送货单时退回采购明细吨数——先按采购单估算，
-      // 等送货单导入后自动改用真实发货量（2026-10-28 定）。
-      BigDecimal tons = documentTons(deliveries);
-      if (tons.signum() <= 0) {
-        tons = documentTons(documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getBatchId, batchId)
-            .eq(Document::getDocType, "supply_order")
-            .in(Document::getStatus, "matched", "archived")));
+    // 材料行 → [采购吨数, 采购金额]
+    Map<String, BigDecimal[]> byMaterial = new java.util.HashMap<>();
+    BigDecimal allTons = BigDecimal.ZERO;
+    BigDecimal allAmount = BigDecimal.ZERO;
+    for (DocumentItem item : supplyItems) {
+      BigDecimal tons = salePriceService.pricingTons(item);
+      BigDecimal amount = nz(item.getAmount());
+      if (tons == null || tons.signum() <= 0 || amount.signum() <= 0) {
+        continue;
       }
-      if (tons.signum() > 0) {
-        return perTon.multiply(tons).setScale(2, RoundingMode.HALF_UP);
+      BigDecimal[] agg = byMaterial.computeIfAbsent(
+          materialKeyOf(item), key -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+      agg[0] = agg[0].add(tons);
+      agg[1] = agg[1].add(amount);
+      allTons = allTons.add(tons);
+      allAmount = allAmount.add(amount);
+    }
+    BigDecimal fallbackUnitPrice = allTons.signum() > 0
+        ? allAmount.divide(allTons, 4, RoundingMode.HALF_UP) : null;
+
+    BigDecimal total = BigDecimal.ZERO;
+    for (Document delivery : deliveries) {
+      for (DocumentItem item : getDocumentItems(delivery.getId())) {
+        BigDecimal tons = salePriceService.pricingTons(item);
+        if (tons == null || tons.signum() <= 0) {
+          continue;
+        }
+        BigDecimal[] agg = byMaterial.get(materialKeyOf(item));
+        BigDecimal unitPrice = agg != null && agg[0].signum() > 0
+            ? agg[1].divide(agg[0], 4, RoundingMode.HALF_UP)
+            : fallbackUnitPrice;
+        if (unitPrice == null) {
+          continue;
+        }
+        total = total.add(unitPrice.multiply(tons));
       }
     }
-    return BigDecimal.ZERO;
+    // 一张送货明细都算不出吨数时，宁可回到采购金额，也不要凭空把成本清零
+    return total.signum() > 0 ? total.setScale(2, RoundingMode.HALF_UP) : supplyAmount;
   }
 
-  /** 单据明细计价吨数合计；单号为空时返回 0（避免 IN () 变成全表查询）。 */
-  private BigDecimal documentTons(List<Document> documents) {
-    if (documents == null || documents.isEmpty()) {
-      return BigDecimal.ZERO;
+  /** 采购/送货明细配对键：材料行 id 优先（同一材料行两侧共用），没有才退到名称+规格。 */
+  private static String materialKeyOf(DocumentItem item) {
+    if (StringUtils.hasText(item.getMaterialId())) {
+      return "M:" + item.getMaterialId();
     }
-    return nz(documentItemMapper.selectList(Wrappers.<DocumentItem>lambdaQuery()
-            .in(DocumentItem::getDocumentId,
-                documents.stream().map(Document::getId).toList()))
-        .stream()
-        .map(this::tonnageOf)
-        .reduce(BigDecimal.ZERO, BigDecimal::add));
+    return "S:" + (item.getMaterialName() == null ? "" : item.getMaterialName())
+        + "|" + (item.getSpec() == null ? "" : item.getSpec());
+  }
+
+  /** 批次已确认送货单的货款合计（不含客户承担的运费）：销售口径以送货量为准的取数入口。 */
+  private BigDecimal deliveryGoodsTotal(String batchId) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (Document delivery : documentMapper.selectList(Wrappers.<Document>lambdaQuery()
+        .eq(Document::getBatchId, batchId)
+        .eq(Document::getDocType, "delivery_note")
+        .in(Document::getStatus, "matched", "archived"))) {
+      total = total.add(deliveryContributedSales(delivery, getDocumentItems(delivery.getId())));
+    }
+    return total.setScale(2, RoundingMode.HALF_UP);
   }
 
   /**
-   * 批次采购运费统一重算（2026-11-04 方案 B）：「运输费用」列与采购毛利率的运费同源，
-   * 都取 {@link #batchFreightCost}（运输单合计 > 送货单标注合计 > 批次口径推算）。
-   * 单据确认/修正/删除与口径变更路径调用；幂等，整批一个数——
-   * 此前「采购毛利率按口径扣运费、运输费用列不算口径」的口径分裂就此消除。
+   * 批次客户承担的送货运费：取运费表 sales 侧合计（2026-11-11 改）。
+   *
+   * <p>口径行与「单据写明」行并列累加；「含运费」口径（显式 0）不生成行，自然为 0。
+   * 这笔钱同时进毛利率分子和分母：客户付的运费是收入，我们付的采购运费在成本侧扣。
+   */
+  private BigDecimal batchSalesFreight(String batchId) {
+    return freightService.sum(batchId, FreightService.SIDE_SALES);
+  }
+
+  /**
+   * 批次运费统一重算（2026-11-11）：先重建运费行，再回填台账。
+   *
+   * <ul>
+   *   <li>{@code freight}（采购运费成本）= 运费表 purchase 侧合计；</li>
+   *   <li>销售运费不再挂单据：{@code sales_amount} 按「新 sales 侧合计 − 旧合计」做差额同步，
+   *       所以口径或单据变化只需调本方法，金额自洽且幂等。</li>
+   * </ul>
    */
   public void recalcFreight(String batchId) {
     if (!StringUtils.hasText(batchId)) {
@@ -1031,75 +1086,35 @@ public class LedgerService {
     if (records.isEmpty()) {
       return;
     }
-    Map<String, Object> hints = batchHintService.deliveryNoteHints(batchMapper.selectById(batchId));
-    List<Document> supplies = confirmedSupplies(batchId);
-    List<DocumentItem> supplyItems = supplies.isEmpty() ? List.of()
-        : documentItemMapper.selectList(Wrappers.<DocumentItem>lambdaQuery()
-            .in(DocumentItem::getDocumentId, supplies.stream().map(Document::getId).toList()));
-    BigDecimal freight = batchFreightCost(batchId, hints, supplyItems);
+    // 重建前先记下销售运费合计，用于把差额同步进销售金额
+    BigDecimal beforeSalesFreight = freightService.sum(batchId, FreightService.SIDE_SALES);
+    freightService.rebuild(batchId);
+    BigDecimal freight = freightService.sum(batchId, FreightService.SIDE_PURCHASE);
+    BigDecimal afterSalesFreight = freightService.sum(batchId, FreightService.SIDE_SALES);
+
     LedgerRecord record = records.get(0);
-    if (nz(record.getFreight()).compareTo(freight) == 0) {
+    BigDecimal salesDelta = afterSalesFreight.subtract(beforeSalesFreight);
+    if (nz(record.getFreight()).compareTo(freight) == 0 && salesDelta.signum() == 0) {
       return;
     }
     record.setFreight(freight);
+    if (salesDelta.signum() != 0) {
+      record.setSalesAmount(nonNegative(nz(record.getSalesAmount()).add(salesDelta)));
+    }
     recalculate(record);
     record.setUpdatedAt(LocalDateTime.now());
     ledgerRecordMapper.updateById(record);
   }
 
   /**
-   * 批次采购运费成本（2026-11-07 改为按来源累加，用户口径）：
-   * 运输单（独立运费凭证）合计 + 送货单承载的采购运费（transportFee）合计 + 批次运费口径推算，
-   * 三项都是「我们付给承运方的钱」，全部相加。
+   * 批次采购运费成本：直接取运费表 purchase 侧合计（2026-11-11 改）。
    *
-   * <p>口径推算：元/趟 是<b>批次包干价</b>（这个批次这一趟多少钱，直接取该金额，不乘任何单据张数）；
-   * 元/吨 × 采购明细计价吨数合计。口径与重量都缺则不算口径那一份（宁可空缺，不猜）。
-   *
-   * <p>此前是「运输单 > 送货单标注 > 口径」的优先级覆盖（有单据就不再算口径）；
-   * 现在口径独立成一份运费（在台账里体现为独立的「运输费用」行），与运费单据并存累加。
+   * <p>运费行由 {@link FreightService#rebuild(String)} 按批次重建，四类来源并列累加：
+   * 运输单、送货单写明的运费、元/吨口径、元/趟口径。同一份钱不会再因为
+   * 「AI 按口径把 transportFee 填进单据 + 后端再按口径算一份」而重复计入。
    */
-  private BigDecimal batchFreightCost(
-      String batchId,
-      Map<String, Object> hints,
-      List<DocumentItem> supplyItems
-  ) {
-    BigDecimal transportNote = nz(documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getBatchId, batchId)
-            .eq(Document::getDocType, "transport_note")
-            .in(Document::getStatus, "matched", "archived"))
-        .stream()
-        .map(Document::getAmount)
-        .map(LedgerService::nz)
-        .reduce(BigDecimal.ZERO, BigDecimal::add));
-    BigDecimal deliveryFreight = nz(documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getBatchId, batchId)
-            .eq(Document::getDocType, "delivery_note")
-            .in(Document::getStatus, "matched", "archived"))
-        .stream()
-        .map(this::deliveryFreightAmount)
-        .reduce(BigDecimal.ZERO, BigDecimal::add));
-    BigDecimal imputed = BigDecimal.ZERO;
-    if (hints != null && !hints.isEmpty()) {
-      BigDecimal perTrip = BatchHintService.decimal(
-          hints.get(BatchHintService.KEY_SUPPLY_FREIGHT_PER_TRIP));
-      if (perTrip != null) {
-        // 「元/趟」是批次包干价：这个批次这一趟多少钱，运费就是这个数，
-        // 不数送货单也不数采购单（2026-11-06 按用户口径修正；此前乘单据张数，纯采购单批次恒为 0）
-        imputed = perTrip;
-      } else {
-        BigDecimal perTon = BatchHintService.decimal(
-            hints.get(BatchHintService.KEY_SUPPLY_FREIGHT_PER_TON));
-        if (perTon != null) {
-          BigDecimal tons = supplyItems.stream()
-              .map(this::tonnageOf)
-              .reduce(BigDecimal.ZERO, BigDecimal::add);
-          if (tons.signum() > 0) {
-            imputed = perTon.multiply(tons);
-          }
-        }
-      }
-    }
-    return transportNote.add(deliveryFreight).add(imputed).setScale(2, RoundingMode.HALF_UP);
+  private BigDecimal batchFreightCost(String batchId) {
+    return freightService.sum(batchId, FreightService.SIDE_PURCHASE);
   }
 
   /** 明细吨数：优先重量（换算成吨），无重量时按计价单位=吨的计价数量兜底。 */
@@ -1145,6 +1160,10 @@ public class LedgerService {
       }
       // 毛利算不出的原因（缺定价口径/无采购单/采购明细缺吨数金额），前端据此显示提示而非空白
       summary.setPurchaseMarginNote(margin.note());
+      // 采购毛利差额（2026-11-11）：按采购量的估算货款 − 按送货量的实际货款
+      summary.setPurchaseMarginGap(margin.gap());
+      // 运费明细行（口径/运输单/单据写明并列），页面与导出的构成明细直接读它
+      summary.setFreightItems(freightService.list(entry.getKey(), null));
       summary.setDeliveryCostPendingCount(deliveryCostPendingCount(entry.getKey()));
     }
     return records;
@@ -1284,26 +1303,6 @@ public class LedgerService {
   private String extractText(Document document, String field) {
     Object value = structuredData(document).get(field);
     return value == null ? null : String.valueOf(value);
-  }
-
-  /** 送货单上标注为运输费用的金额（structuredData.transportFee/freight）；amount 字段是销售额。 */
-  private BigDecimal deliveryFreightAmount(Document document) {
-    Map<String, Object> structured = structuredData(document);
-    Object fee = structured.get("transportFee");
-    if (fee == null) {
-      fee = structured.get("freight");
-    }
-    if (fee == null) {
-      return BigDecimal.ZERO;
-    }
-    if (fee instanceof Number number) {
-      return BigDecimal.valueOf(number.doubleValue()).max(BigDecimal.ZERO);
-    }
-    try {
-      return new BigDecimal(String.valueOf(fee).replaceAll("[^\\d.-]", "")).max(BigDecimal.ZERO);
-    } catch (Exception ex) {
-      return BigDecimal.ZERO;
-    }
   }
 
   private Map<String, Object> structuredData(Document document) {

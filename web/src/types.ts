@@ -133,6 +133,22 @@ export interface LedgerRow {
   purchaseSalesFreight?: number;
   /** 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额 */
   deliveryCostPendingCount?: number;
+  /** 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单 */
+  purchaseMarginGap?: number;
+  /** 运费明细行（批次级）：口径 / 运输单 / 单据写明并列累加，运输费用行的构成明细直接读它 */
+  freightItems?: Array<{
+    id: string;
+    side: 'purchase' | 'sales';
+    source: 'policy_ton' | 'policy_trip' | 'transport_note' | 'document_stated';
+    sourceDocumentId?: string;
+    tons?: number;
+    unitPrice?: number;
+    amount: number;
+    note?: string;
+    /** 承运单位（V28 起存在运费行上，可人工覆盖；口径行可能为空） */
+    carrierName?: string;
+    carrierManual?: boolean;
+  }>;
   projectManager?: string;
   status: '已对平' | '待补充' | '待付款' | '待收款' | '票款差异';
 }

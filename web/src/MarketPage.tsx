@@ -184,7 +184,8 @@ export function MarketPage({
   const [editMaterialPrice, setEditMaterialPrice] = useState('');
   const [savingMaterialPrice, setSavingMaterialPrice] = useState(false);
   // 规格候选按「当前选中的行情产品」实时拉取
-  const [bindSpecOptions, setBindSpecOptions] = useState<string[]>([]);
+  const [bindSpecOptions, setBindSpecOptions] =
+    useState<Array<{ spec: string; sources?: string[]; price?: number }>>([]);
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -851,7 +852,13 @@ export function MarketPage({
                       : '— 选择规格 —'
                 }
                 disabled={!bindProduct || bindSpecOptions.length === 0}
-                options={bindSpecOptions.map((spec) => ({ value: spec, label: spec }))}
+                options={bindSpecOptions.map((option) => ({
+                  value: option.spec,
+                  // 同名规格可能有两个来源，绑定时按来源区分（取价日由单据日期自动解析，不看日期）
+                  label: option.sources && option.sources.length > 0
+                    ? `${option.spec} · ${option.sources.join(' / ')}`
+                    : option.spec
+                }))}
                 onChange={setBindSpec}
                 width="100%"
               />

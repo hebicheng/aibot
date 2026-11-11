@@ -120,6 +120,8 @@ type ItemDraft = {
   // 采购单销售价：空=按批次口径自动推算；salesUnitPriceAuto 仅用于输入框占位提示
   salesUnitPrice: string;
   salesUnitPriceAuto: string;
+  // true=行级人工价（document_items.sales_unit_price）；false=锁定/口径算出来的自动价
+  salesUnitPriceManual: boolean;
   amount: string;
 };
 
@@ -141,6 +143,7 @@ const itemDraft = (item?: ApiDocumentItem, index = 0, docType?: string): ItemDra
     ? (item?.salesUnitPrice != null ? String(item.salesUnitPrice) : '')
     : (item?.salesUnitPriceManual ? String(item?.salesUnitPrice ?? '') : ''),
   salesUnitPriceAuto: item?.salesUnitPriceAuto != null ? String(item.salesUnitPriceAuto) : '',
+  salesUnitPriceManual: Boolean(item?.salesUnitPriceManual),
   amount: String(item?.amount || '')
 });
 
@@ -253,6 +256,9 @@ function DataRecordDrawer({
   const supportsItems = ['supply_order', 'delivery_note', 'invoice', 'purchase_invoice', 'sales_invoice', 'invoice_unknown'].includes(draft.docType);
   // 采购单：明细多一列销售价（按批次口径由采购价推算，可人工覆盖）
   const showSalesPrice = draft.docType === 'supply_order' || draft.docType === 'delivery_note';
+  // 送货单的「单价」列全库为空（单据单价就是销售价，台账只用销售价算金额），
+  // 隐藏后只剩一列价格，避免一整列横线（2026-11-11）
+  const showUnitPrice = draft.docType !== 'delivery_note';
   const itemTotal = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const amountMismatch = draft.docType === 'supply_order'
     && items.length > 0
@@ -444,13 +450,13 @@ function DataRecordDrawer({
                   )}
                 </div>
                 <div className="data-items-table">
-                  <div className={`data-item-row head ${editing ? 'editing' : ''} ${showSalesPrice ? 'with-sales' : ''}`}>
+                  <div className={`data-item-row head ${editing ? 'editing' : ''} ${showSalesPrice ? 'with-sales' : ''} ${showUnitPrice ? '' : 'no-unit-price'}`}>
                     <span>材料 / 规格</span>
                     <span>产地</span>
                     <span>件数</span>
                     <span>重量</span>
                     <span>计价数量</span>
-                    <span>单价</span>
+                    {showUnitPrice && <span>单价</span>}
                     {showSalesPrice && <span title={draft.docType === 'delivery_note'
                       ? '本行销售单价（元/吨）：填了就按它算销售金额，优先于网价/毛利率口径；清空恢复自动'
                       : '按批次默认口径由采购价推算，可改；清空恢复自动'}>销售价</span>}
@@ -458,7 +464,7 @@ function DataRecordDrawer({
                     {editing && <span />}
                   </div>
                   {items.map((item, index) => (
-                    <div className={`data-item-row ${editing ? 'editing' : ''} ${showSalesPrice ? 'with-sales' : ''}`} key={item.id}>
+                    <div className={`data-item-row ${editing ? 'editing' : ''} ${showSalesPrice ? 'with-sales' : ''} ${showUnitPrice ? '' : 'no-unit-price'}`} key={item.id}>
                       <span className="material-cell">
                         {editing ? (
                           <>
@@ -485,7 +491,9 @@ function DataRecordDrawer({
                           </span>
                         );
                       })}
-                      <span>{editing ? <input type="number" step="any" value={item.unitPrice} onChange={(event) => updateItem(index, 'unitPrice', event.target.value)} /> : money(Number(item.unitPrice))}</span>
+                      {showUnitPrice && (
+                        <span>{editing ? <input type="number" step="any" value={item.unitPrice} onChange={(event) => updateItem(index, 'unitPrice', event.target.value)} /> : money(Number(item.unitPrice))}</span>
+                      )}
                       {showSalesPrice && (
                         <span>
                           {editing ? (
@@ -501,8 +509,8 @@ function DataRecordDrawer({
                           ) : (
                             <>
                               {salesPriceText(item) === '' ? '-' : money(Number(salesPriceText(item)))}
-                              {item.salesUnitPrice !== '' && <small className="sales-price-tag manual">手动</small>}
-                              {item.salesUnitPrice === '' && salesPriceText(item) !== '' && (
+                              {item.salesUnitPriceManual && <small className="sales-price-tag manual">手动</small>}
+                              {!item.salesUnitPriceManual && salesPriceText(item) !== '' && (
                                 <small className="sales-price-tag">自动</small>
                               )}
                             </>

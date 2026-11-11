@@ -4179,6 +4179,17 @@ select:focus-visible {
   grid-template-columns: 1.3fr 0.62fr 0.88fr 0.88fr 0.92fr 0.72fr 0.72fr 0.78fr 44px;
 }
 
+/* 送货单不显示「单价」列（单据单价全空、销售价才是台账口径）：少一列价格 + 少一个编辑框 */
+.data-item-row.with-sales.no-unit-price {
+  min-width: 800px;
+  grid-template-columns: 1.3fr 0.62fr 0.72fr 0.72fr 0.82fr 0.78fr 0.85fr;
+}
+
+.data-item-row.editing.with-sales.no-unit-price {
+  min-width: 1000px;
+  grid-template-columns: 1.3fr 0.62fr 0.88fr 0.88fr 0.92fr 0.78fr 0.85fr 44px;
+}
+
 /* 销售价来源角标：自动=灰，手动=蓝 */
 .sales-price-tag {
   margin-left: 4px;
@@ -5555,6 +5566,17 @@ select:focus-visible {
   background: #f7f8fa;
 }
 
+/* 台账编辑态：运输费用行的承运单位逐行输入（V28 起存在运费行上，可人工覆盖） */
+/* 台账编辑态：运费明细分行里逐笔改承运单位（V28 起存在运费行上） */
+.grouped-ledger-table .freight-carrier-input {
+  width: 100%;
+  min-width: 90px;
+  padding: 2px 6px;
+  border: 1px solid #d8e0dd;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 .grouped-ledger-table thead .head-material {
   background: #f7faf7;
 }
@@ -5569,6 +5591,11 @@ select:focus-visible {
 
 .grouped-ledger-table thead .head-invoice {
   background: #fbf8f1;
+}
+
+/* 采购毛利差额（2026-11-11 新增）：与采购毛利列同族浅底，避免多一套颜色信号 */
+.grouped-ledger-table thead .head-purchase-gap {
+  background: #f7faf7;
 }
 
 .grouped-ledger-table thead .head-sales {

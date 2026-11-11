@@ -60,6 +60,7 @@ class DocumentServiceTest {
   @Mock private ReconciliationChatService reconciliationChatService;
   @Mock private BatchHintService batchHintService;
   @Mock private com.aibot.purchase.service.market.PurchaseSalePriceService purchaseSalePriceService;
+  @Mock private com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper;
 
   private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
   private DocumentService service;
@@ -85,7 +86,8 @@ class DocumentServiceTest {
         billingService,
         reconciliationChatService,
         batchHintService,
-        purchaseSalePriceService
+        purchaseSalePriceService,
+        itemNetMappingMapper
     );
   }
 

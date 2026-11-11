@@ -161,9 +161,9 @@ public class MarketController {
   public record QuotePriceUpdate(java.math.BigDecimal price, String currentBatchId) {
   }
 
-  /** 指定产品的行情规格候选（人工绑定下拉用）。 */
+  /** 指定产品的行情规格候选（人工绑定下拉用）：规格 + 该规格有哪些来源渠道。 */
   @GetMapping("/products/{code}/specs")
-  public ApiResponse<List<String>> productSpecs(@PathVariable String code) {
+  public ApiResponse<List<Map<String, Object>>> productSpecs(@PathVariable String code) {
     return ApiResponse.ok(matchService.candidateSpecs(code));
   }
 

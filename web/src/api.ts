@@ -394,6 +394,22 @@ export type ApiLedgerRow = {
   purchaseSalesFreight?: number;
   // 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额
   deliveryCostPendingCount?: number;
+  // 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单
+  purchaseMarginGap?: number;
+  // 运费明细行（批次级）：口径/运输单/单据写明并列累加，运输费用行的构成明细直接用它
+  freightItems?: Array<{
+    id: string;
+    side: 'purchase' | 'sales';
+    source: 'policy_ton' | 'policy_trip' | 'transport_note' | 'document_stated';
+    sourceDocumentId?: string;
+    tons?: number;
+    unitPrice?: number;
+    amount: number;
+    note?: string;
+    /** 承运单位（V28 起存在运费行上，可人工覆盖；口径行可能为空） */
+    carrierName?: string;
+    carrierManual?: boolean;
+  }>;
   projectManager?: string;
   status: string;
   // 月结加价利息（时点值，后端每次现算）
@@ -740,6 +756,12 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(edits)
   }),
+  /** 人工改运费行承运单位（按行改：运费行 id → 承运单位，空串=清空）。 */
+  updateFreightCarriers: (batchId: string, carriers: Record<string, string>) =>
+    request<ApiLedgerRow[]>(
+      `/api/documents/ledger/batch/${batchId}/freight-carriers`,
+      { method: 'PUT', body: JSON.stringify(carriers) }
+    ),
   report: (projectId?: string, batchId?: string) => {
     const params = new URLSearchParams({ scope: batchId ? 'batch' : 'project' });
     if (projectId) params.set('projectId', projectId);
@@ -787,8 +809,11 @@ export const api = {
     request<number>(`/api/market/match/run?batchId=${encodeURIComponent(batchId)}`, { method: 'POST' }),
   // 指定产品的行情规格候选（人工绑定用）。按「用户选中的产品」实时拉取，
   // 与 mapping.candidates（按材料推导产品码预计算）无关。
+  /** 规格候选：spec=规格名，sources=该规格有哪些来源渠道（mysteel 权威 / gtgqw 爬取） */
   marketProductSpecs: (code: string) =>
-    request<string[]>(`/api/market/products/${encodeURIComponent(code)}/specs`),
+    request<Array<{ spec: string; sources?: string[]; price?: number }>>(
+      `/api/market/products/${encodeURIComponent(code)}/specs`
+    ),
   marketCrawlLatest: () => request<MarketCrawlLogRow[]>('/api/market/crawl/latest')
 };
 

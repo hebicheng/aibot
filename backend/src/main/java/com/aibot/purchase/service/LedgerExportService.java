@@ -71,22 +71,23 @@ public class LedgerExportService {
   private static final int C_INVOICE_DATE = 17;
   private static final int C_INVOICE_AMOUNT = 18;
   private static final int C_TAX_RATE = 19;
-  private static final int C_SALES_ORDER = 20;
-  private static final int C_SALES_AMOUNT = 21;
+  private static final int C_PURCHASE_GAP = 20;
+  private static final int C_SALES_ORDER = 21;
+  private static final int C_SALES_AMOUNT = 22;
   /** 销售区「销售运费」：销售总金额里含的客户承担运费，只作构成说明（2026-10-28 建）。 */
-  private static final int C_SALES_FREIGHT = 22;
-  private static final int C_SALES_INVOICE_DATE = 23;
-  private static final int C_SALES_INVOICE_AMOUNT = 24;
-  private static final int C_SALES_TAX_RATE = 25;
-  private static final int C_RECEIVED = 26;
-  private static final int C_OUTSTANDING = 27;
-  private static final int C_RECEIPT_DATE = 28;
-  private static final int C_REQUIRED_RECEIPT_DATE = 29;
-  private static final int C_INTEREST = 30;
-  private static final int C_GROSS_PROFIT = 31;
-  private static final int C_GROSS_MARGIN = 32;
-  private static final int C_MANAGER = 33;
-  private static final int C_STATUS = 34;
+  private static final int C_SALES_FREIGHT = 23;
+  private static final int C_SALES_INVOICE_DATE = 24;
+  private static final int C_SALES_INVOICE_AMOUNT = 25;
+  private static final int C_SALES_TAX_RATE = 26;
+  private static final int C_RECEIVED = 27;
+  private static final int C_OUTSTANDING = 28;
+  private static final int C_RECEIPT_DATE = 29;
+  private static final int C_REQUIRED_RECEIPT_DATE = 30;
+  private static final int C_INTEREST = 31;
+  private static final int C_GROSS_PROFIT = 32;
+  private static final int C_GROSS_MARGIN = 33;
+  private static final int C_MANAGER = 34;
+  private static final int C_STATUS = 35;
 
   private final BusinessQueryService businessQueryService;
   private final DocumentService documentService;
@@ -351,33 +352,40 @@ public class LedgerExportService {
               .filter(doc -> !StringUtils.hasText(doc.getTargetDocumentId())
                   || transportSourceIds.contains(doc.getTargetDocumentId()))
               .toList();
-          BigDecimal imputedFreight = totalFreight.subtract(docFreight).max(BigDecimal.ZERO);
+          // 构成明细直接读运费行（口径 / 运输单 / 单据写明并列累加，2026-11-11），
+          // 不再按「总额 − 单据运费」倒算一条「按运费口径」
+          List<com.aibot.purchase.entity.FreightItem> freightRows =
+              batchSummary == null || batchSummary.getFreightItems() == null
+                  ? List.of() : batchSummary.getFreightItems();
           ExportRow row = new ExportRow();
           row.kind = "transport";
           row.material = "运输费用";
-          row.spec = transportSources.stream()
-              .map(Document::getDocCode)
+          row.spec = freightRows.stream()
+              .map(com.aibot.purchase.entity.FreightItem::getNote)
               .filter(StringUtils::hasText)
               .distinct()
               .collect(Collectors.joining(" / "));
           if (!StringUtils.hasText(row.spec)) {
-            row.spec = "按运费口径";
-          } else if (imputedFreight.signum() > 0) {
-            row.spec = row.spec + " + 按运费口径";
+            row.spec = transportSources.stream()
+                .map(Document::getDocCode)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.joining(" / "));
           }
-          row.supplier = transportSources.stream()
-              // 运输单取往来单位（承运单位必填）；送货单取 structuredData.carrierName（人工补录，选填）
-              .map(doc -> "delivery_note".equals(doc.getDocType())
-                  ? structuredText(doc, "carrierName") : doc.getSupplierName())
+          if (!StringUtils.hasText(row.spec)) {
+            row.spec = "运输费用";
+          }
+          // 承运单位以运费行为准（V28 起存在行上、可人工覆盖），不再回头拼源单据
+          row.supplier = freightRows.stream()
+              .map(com.aibot.purchase.entity.FreightItem::getCarrierName)
               .filter(StringUtils::hasText)
               .distinct()
               .collect(Collectors.joining(" / "));
           if (!StringUtils.hasText(row.supplier)) {
             row.supplier = "待补充承运单位";
           }
-          // 笔数：按单据张数；纯口径运费没有单据也算 1 笔（这一趟）
-          row.purchaseQuantity = BigDecimal.valueOf(
-              transportSources.isEmpty() ? 1 : transportSources.size());
+          // 笔数：按运费行条数（口径行也算一笔）
+          row.purchaseQuantity = BigDecimal.valueOf(Math.max(freightRows.size(), 1));
           row.purchaseUnit = "笔";
           row.purchaseAmount = totalFreight;
           row.deliveryStatus = transportSources.stream()
@@ -454,6 +462,7 @@ public class LedgerExportService {
         // 采购毛利额/毛利率：台账装饰层按批次口径现算的瞬时值（挂在批次首条记录上）
         group.purchaseMarginAmount = summary == null ? null : summary.getPurchaseMarginAmount();
         group.purchaseMarginRate = summary == null ? null : summary.getPurchaseMarginRate();
+        group.purchaseMarginGap = summary == null ? null : summary.getPurchaseMarginGap();
         group.purchaseFreightCost = summary == null ? null : summary.getPurchaseFreightCost();
         group.salesFreight = summary == null || summary.getPurchaseSalesFreight() == null
             ? BigDecimal.ZERO : summary.getPurchaseSalesFreight();
@@ -769,6 +778,15 @@ public class LedgerExportService {
           : quantityText(group.purchaseMarginRate) + "%");
       merge(sheet, start, end, C_PURCHASE_MARGIN, C_PURCHASE_MARGIN);
 
+      // 采购毛利差额：采购量与送货量不一致导致的毛利差（元），无送货单留 "-"
+      if (group.purchaseMarginGap != null) {
+        first.getCell(C_PURCHASE_GAP).setCellValue(group.purchaseMarginGap.doubleValue());
+        first.getCell(C_PURCHASE_GAP).setCellStyle(styles.money);
+      } else {
+        text(first, C_PURCHASE_GAP, "-");
+      }
+      merge(sheet, start, end, C_PURCHASE_GAP, C_PURCHASE_GAP);
+
       // 销售与收款：跨整个批次合并
       text(first, C_SALES_ORDER, StringUtils.hasText(group.salesOrder) ? group.salesOrder : "-");
       first.getCell(C_SALES_AMOUNT).setCellValue(group.sales.doubleValue());
@@ -919,6 +937,8 @@ public class LedgerExportService {
     /** 采购毛利额/毛利率（批次级，后端现算的瞬时值；null=无口径或无有效行，导出显示 "-"） */
     BigDecimal purchaseMarginAmount;
     BigDecimal purchaseMarginRate;
+    /** 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；null=还没有送货单。 */
+    BigDecimal purchaseMarginGap;
     /** 采购运费成本（批次级）：运输单 + 送货单采购运费 + 批次运费口径，累加（2026-11-07 起）。 */
     BigDecimal purchaseFreightCost;
     /** 客户承担的送货运费（批次级）：材料区与销售区各显示一列，数值同源（2026-10-28）。 */

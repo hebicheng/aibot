@@ -90,6 +90,18 @@ public class LedgerRecord {
    */
   @TableField(exist = false)
   private Integer deliveryCostPendingCount;
+  /**
+   * 采购毛利差额（元，批次级，时点值）：按采购量的估算货款 − 按送货量的实际货款。
+   * 采购与送货数量不一致时，正数表示送货少了、实际毛利低于账面估算；没有送货单时为空。
+   */
+  @TableField(exist = false)
+  private BigDecimal purchaseMarginGap;
+  /**
+   * 运费明细行（批次级，时点值，2026-11-11 起）：口径 / 运输单 / 单据写明并列存在，
+   * 页面与导出的「运输费用」行构成明细直接读它，不再按「总额 − 单据运费」倒算。
+   */
+  @TableField(exist = false)
+  private List<FreightItem> freightItems;
 
   public String getId() { return id; }
   public void setId(String id) { this.id = id; }
@@ -189,6 +201,14 @@ public class LedgerRecord {
   public Integer getDeliveryCostPendingCount() { return deliveryCostPendingCount; }
   public void setDeliveryCostPendingCount(Integer deliveryCostPendingCount) {
     this.deliveryCostPendingCount = deliveryCostPendingCount;
+  }
+  public BigDecimal getPurchaseMarginGap() { return purchaseMarginGap; }
+  public void setPurchaseMarginGap(BigDecimal purchaseMarginGap) {
+    this.purchaseMarginGap = purchaseMarginGap;
+  }
+  public List<FreightItem> getFreightItems() { return freightItems; }
+  public void setFreightItems(List<FreightItem> freightItems) {
+    this.freightItems = freightItems;
   }
 }
 

@@ -89,6 +89,7 @@ public class DocumentService {
   private final ReconciliationChatService reconciliationChatService;
   private final BatchHintService batchHintService;
   private final com.aibot.purchase.service.market.PurchaseSalePriceService purchaseSalePriceService;
+  private final com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper;
 
   public DocumentService(
       DocumentMapper documentMapper,
@@ -109,7 +110,8 @@ public class DocumentService {
       BillingService billingService,
       ReconciliationChatService reconciliationChatService,
       BatchHintService batchHintService,
-      com.aibot.purchase.service.market.PurchaseSalePriceService purchaseSalePriceService
+      com.aibot.purchase.service.market.PurchaseSalePriceService purchaseSalePriceService,
+      com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper
   ) {
     this.documentMapper = documentMapper;
     this.documentItemMapper = documentItemMapper;
@@ -130,6 +132,7 @@ public class DocumentService {
     this.reconciliationChatService = reconciliationChatService;
     this.batchHintService = batchHintService;
     this.purchaseSalePriceService = purchaseSalePriceService;
+    this.itemNetMappingMapper = itemNetMappingMapper;
   }
 
   /**
@@ -465,7 +468,6 @@ public class DocumentService {
     doc.setBusinessFingerprint(businessFingerprint(doc));
     applyPricingPolicy(doc, payload, guidanceText);
     // 送货单运费批次默认值（在定价策略之后：payload 已抽到的销售运费优先）
-    applyFreightHintDefaults(doc);
     documentMapper.updateById(doc);
   }
 
@@ -817,6 +819,29 @@ public class DocumentService {
           row.put("salesUnitPriceManual", item.getSalesUnitPrice() != null);
           return row;
         }).toList());
+      } else if ("delivery_note".equals(document.getDocType())) {
+        // 送货单的销售价在锁定记录里（document_item_market_mappings）；
+        // 行上 document_items.sales_unit_price 只有人工改过才有值（2026-11-11）
+        java.util.Map<String, com.aibot.purchase.entity.DocumentItemMarketMapping> byItem =
+            new java.util.HashMap<>();
+        for (com.aibot.purchase.entity.DocumentItemMarketMapping mapping
+            : itemNetMappingMapper.selectList(
+                Wrappers.<com.aibot.purchase.entity.DocumentItemMarketMapping>lambdaQuery()
+                    .eq(com.aibot.purchase.entity.DocumentItemMarketMapping::getDocumentId,
+                        document.getId()))) {
+          byItem.put(mapping.getDocumentItemId(), mapping);
+        }
+        record.put("items", items.stream().map(item -> {
+          @SuppressWarnings("unchecked")
+          java.util.Map<String, Object> row = objectMapper.convertValue(item, java.util.Map.class);
+          com.aibot.purchase.entity.DocumentItemMarketMapping mapping = byItem.get(item.getId());
+          BigDecimal locked = mapping == null ? null : mapping.getSalesUnitPrice();
+          boolean manual = item.getSalesUnitPrice() != null;
+          row.put("salesUnitPrice", manual ? item.getSalesUnitPrice() : locked);
+          row.put("salesUnitPriceAuto", locked);
+          row.put("salesUnitPriceManual", manual);
+          return row;
+        }).toList());
       } else {
         record.put("items", items);
       }
@@ -872,7 +897,6 @@ public class DocumentService {
       insertItems(doc.getId(), castList(items));
     }
     // 送货单运费批次默认值（依赖明细重量，须在明细插入后）
-    applyFreightHintDefaults(doc);
     doc.setBusinessFingerprint(businessFingerprint(doc));
     documentMapper.updateById(doc);
     return doc;
@@ -1040,65 +1064,6 @@ public class DocumentService {
     return "uplift".equals(hints.get(BatchHintService.KEY_PRICING_MODE))
         ? BatchHintService.decimal(hints.get(BatchHintService.KEY_UPLIFT_AMOUNT))
         : null;
-  }
-
-  /**
-   * 送货单运费批次默认值（创建阶段一次性算死，卡片可见可改）：
-   * 单据抽取与附带说明都没提运费时，按批次口径补 transportFee（采购运费，structuredData）
-   * 与 salesFreight（销售运费）。元/趟直接取值；元/吨按明细计价重量合计（换算成吨），
-   * 明细无重量则不填（宁可空缺，不猜）。附带的运费说明优先于批次口径。
-   * 仅修改内存中的 doc（structuredData/salesFreight），由调用方的 updateById 持久化；
-   * 必须在明细行插入之后调用（元/吨计算依赖明细重量）。
-   */
-  /**
-   * 送货单创建时按批次口径补**销售运费**默认值（客户承担的运费，挂在送货单上语义正确）。
-   *
-   * <p>2026-11-04 方案 B：采购运费（transportFee）不再写入送货单——它是批次级成本，
-   * 由 LedgerService.recalcFreight 统一从「运输单 > 送货单识别值 > 口径推算」取数；
-   * AI 识别仍抽取 transportFee 存 structuredData 供批次聚合读取，但卡片不再展示/补值。
-   */
-  private void applyFreightHintDefaults(Document doc) {
-    if (!"delivery_note".equals(doc.getDocType()) || !StringUtils.hasText(doc.getBatchId())) {
-      return;
-    }
-    Map<String, Object> hints = batchHintService.deliveryNoteHints(
-        batchMapper.selectById(doc.getBatchId()));
-    if (hints.isEmpty()) {
-      return;
-    }
-    // 附带信息优先：说明/备注提到了运费就不套用默认值
-    if (mentionsFreight(
-        valueOrEmpty(doc.getGuidanceText()) + " " + valueOrEmpty(doc.getRemark()))) {
-      return;
-    }
-    boolean changed = false;
-    if (doc.getSalesFreight() == null) {
-      BigDecimal salesPerTrip = BatchHintService.decimal(hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TRIP));
-      BigDecimal salesPerTon = BatchHintService.decimal(hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TON));
-      if (salesPerTrip != null) {
-        // 元/趟 = 整批一趟包干价（与采购运费同口径，2026-11-06）：只由批次第一张送货单承担。
-        // 批次里已有别的送货单挂过销售运费就不再写，否则第 2 张起各收一趟，销售总金额被放大。
-        Long claimed = documentMapper.selectCount(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getBatchId, doc.getBatchId())
-            .eq(Document::getDocType, "delivery_note")
-            .in(Document::getStatus, "matched", "archived")
-            .isNotNull(Document::getSalesFreight)
-            .ne(Document::getId, doc.getId()));
-        if (claimed == null || claimed == 0) {
-          doc.setSalesFreight(salesPerTrip);
-          changed = true;
-        }
-      } else if (salesPerTon != null) {
-        BigDecimal tonnage = pricingTons(doc.getId());
-        if (tonnage != null) {
-          doc.setSalesFreight(salesPerTon.multiply(tonnage).setScale(2, RoundingMode.HALF_UP));
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      documentMapper.updateById(doc);
-    }
   }
 
   /** 明细计价重量合计（吨）：totalWeight 换算优先，无重量时用计价数量（重量单位才计）。任一行都没有重量返回 null。 */

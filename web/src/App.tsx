@@ -365,6 +365,8 @@ const mapLedger = (
       deliveryCostPendingCount: row.deliveryCostPendingCount == null
         ? undefined
         : Number(row.deliveryCostPendingCount),
+      purchaseMarginGap: row.purchaseMarginGap == null ? undefined : Number(row.purchaseMarginGap),
+      freightItems: row.freightItems,
       projectManager: row.projectManager,
       status
     };
@@ -2410,6 +2412,7 @@ function CreateBatchModal({
   const [salesFreightUnit, setSalesFreightUnit] = useState<'trip' | 'ton'>('trip');
   const [pricingMode, setPricingMode] = useState<'' | 'uplift' | 'margin'>('');
   const [pricingValue, setPricingValue] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -2425,11 +2428,17 @@ function CreateBatchModal({
       setPricingValue('');
       return;
     }
-    const fill = (batch: Batch) => {
-      setDate(batch.date);
-      setName(batch.name);
-      setMaterial(batch.material);
-      const hint = (batch.businessHints?.delivery_note || {}) as Record<string, unknown>;
+    const fill = (batch: Batch | Record<string, unknown>) => {
+      // 列表项是前端 Batch（date/material），批次详情接口返回的是后端 BatchDto
+      // （businessDate/materialSummary）——两种都要认，否则详情覆盖后日期变空，
+      // 保存时命中下面的校验，表现为「点保存没反应」（2026-11-11 修）
+      const raw = batch as unknown as Record<string, unknown>;
+      const text = (value: unknown) => (value == null ? '' : String(value));
+      setDate(text(raw.date ?? raw.businessDate));
+      setName(text(raw.name));
+      setMaterial(text(raw.material ?? raw.materialSummary));
+      const hints = (raw.businessHints ?? {}) as Record<string, Record<string, unknown>>;
+      const hint = (hints.delivery_note || {}) as Record<string, unknown>;
       const numToText = (value: unknown) => (value == null ? '' : String(value));
       const supplyIsTon = hint.supplyFreightPerTon != null;
       setSupplyFreight(numToText(supplyIsTon ? hint.supplyFreightPerTon : hint.supplyFreightPerTrip));
@@ -2507,7 +2516,11 @@ function CreateBatchModal({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const resolvedMaterial = material.trim();
-    if (!date || !resolvedMaterial) return;
+    if (!date || !resolvedMaterial) {
+      setError(!date ? '请先选择业务日期' : '请填写主要材料');
+      return;
+    }
+    setError('');
     const resolvedName = name.trim() || `${date} ${resolvedMaterial}批次`;
     onCreate({
       date,
@@ -2656,6 +2669,11 @@ function CreateBatchModal({
           </div>
         )}
 
+        {error && (
+          <p role="alert" style={{ margin: '0 0 10px', color: '#c0392b', fontSize: 13 }}>
+            {error}
+          </p>
+        )}
         <div className="entity-modal-note">
           <FolderKanban size={16} />
           {isEdit

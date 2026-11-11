@@ -1683,7 +1683,13 @@ const pageObject = {
     // 拉取当前产品的规格候选
     if (bindProduct) {
       api.marketProductSpecs(bindProduct)
-        .then((specs) => this.setData({ marketBindSpecs: (specs || []).map((name) => ({ value: name, label: name })) }))
+        .then((specs) => this.setData({ marketBindSpecs: (specs || []).map((option) => ({
+          value: option.spec,
+          // 规格候选带来源渠道（mysteel 权威价 / gtgqw 爬取价），绑定时用来区分
+          label: option.sources && option.sources.length
+            ? `${option.spec} · ${option.sources.join(' / ')}`
+            : option.spec
+        })) }))
         .catch(() => this.setData({ marketBindSpecs: [] }));
     }
   },
@@ -1703,7 +1709,13 @@ const pageObject = {
     });
     // 从后端拉取该产品的规格候选
     api.marketProductSpecs(product.value)
-      .then((specs) => this.setData({ marketBindSpecs: (specs || []).map((name) => ({ value: name, label: name })) }))
+      .then((specs) => this.setData({ marketBindSpecs: (specs || []).map((option) => ({
+          value: option.spec,
+          // 规格候选带来源渠道（mysteel 权威价 / gtgqw 爬取价），绑定时用来区分
+          label: option.sources && option.sources.length
+            ? `${option.spec} · ${option.sources.join(' / ')}`
+            : option.spec
+        })) }))
       .catch(() => this.setData({ marketBindSpecs: [] }));
   },
 

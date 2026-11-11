@@ -164,8 +164,26 @@ type BatchGroup = {
   purchaseFreightCost?: number;
   // 客户承担的送货运费（批次级）：与货款一起构成总收入（毛利率分母），同时是毛利额加项
   purchaseSalesFreight?: number;
+  // 销售运费的构成说明（运费行 note 拼接，如「按口径 40 元/吨 × 13.653 吨」）
+  salesFreightDetail?: string;
   // 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额
   deliveryCostPendingCount?: number;
+  // 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单
+  purchaseMarginGap?: number;
+  // 运费明细行（批次级）：口径/运输单/单据写明并列累加
+  freightItems?: Array<{
+    id: string;
+    side: 'purchase' | 'sales';
+    source: 'policy_ton' | 'policy_trip' | 'transport_note' | 'document_stated';
+    sourceDocumentId?: string;
+    tons?: number;
+    unitPrice?: number;
+    amount: number;
+    note?: string;
+    /** 承运单位（V28 起存在运费行上，可人工覆盖；口径行可能为空） */
+    carrierName?: string;
+    carrierManual?: boolean;
+  }>;
   projectManager: string;
   status: string;
 };
@@ -447,37 +465,33 @@ function buildGroups(
       const summaryLedgerRow = batchLedger[0];
       const ledgerFreight = Number(summaryLedgerRow?.purchaseFreightCost ?? 0);
       const totalFreight = ledgerFreight > 0 ? ledgerFreight : docFreight;
-      const imputedFreight = Math.max(totalFreight - docFreight, 0);
+      // 运费行（采购侧）：口径 / 运输单 / 单据写明并列累加，构成明细直接读后端运费行（2026-11-11）
+      const purchaseFreightRows = (summaryLedgerRow?.freightItems ?? [])
+        .filter((item) => item.side === 'purchase');
       const transportRows: DetailRow[] = [];
       if (totalFreight > 0) {
         const rowFinanceRecords = transportFinanceRecords.filter((record) =>
           !record.document.targetDocumentId
           || transportSourceIds.has(record.document.targetDocumentId));
         const finance = summarizeFinance(rowFinanceRecords, totalFreight);
-        const details: TransportDetailEntry[] = transportSources.map((record) => ({
-          key: record.document.id,
-          source: record.document.docType === 'delivery_note' ? '送货单运费' : '运输单',
-          date: record.document.docDate || '',
-          code: record.document.docCode || '',
-          // 送货单的往来单位是客户；承运单位从 structuredData.carrierName 取（人工补录，选填）
-          party: record.document.docType === 'delivery_note'
-            ? deliveryCarrier(record)
-            : record.document.supplierName || '',
-          amount: record.document.docType === 'delivery_note'
-            ? deliveryFreight(record)
-            : Number(record.document.amount || 0)
-        }));
-        // 口径推算的那一份运费（没有运费单据时它就是这一行的全部金额），明细里单列一条「按运费口径」
-        if (imputedFreight > 0) {
-          details.push({
-            key: `${batch.id}-transport-imputed`,
-            source: '按运费口径',
-            date: batch.date || '',
-            code: '按口径',
-            party: '待补充承运单位',
-            amount: imputedFreight
-          });
-        }
+        const details: TransportDetailEntry[] = purchaseFreightRows.map((item) => {
+          const sourceDocument = item.sourceDocumentId
+            ? batchRecords.find((record) => record.document.id === item.sourceDocumentId)?.document
+            : undefined;
+          const byPolicy = item.source.startsWith('policy');
+          return {
+            key: item.id,
+            source: item.source === 'transport_note' ? '运输单'
+              : item.source === 'document_stated' ? '送货单运费'
+                : item.source === 'policy_trip' ? '按口径（元/趟）' : '按口径（元/吨）',
+            date: sourceDocument?.docDate || batch.date || '',
+            code: sourceDocument?.docCode || (byPolicy ? '按口径' : ''),
+            // 承运单位以运费行为准（V28 起存在行上，可人工覆盖），没有才回退源单据
+            party: item.carrierName || sourceDocument?.supplierName
+              || (byPolicy ? '待补充承运单位' : ''),
+            amount: item.amount
+          };
+        });
         // 承运单位汇总：运输单取往来单位，送货单取人工补录的承运单位（structuredData.carrierName）
         const carriers = transportSources.map((record) =>
           record.document.docType === 'delivery_note'
@@ -489,9 +503,14 @@ function buildGroups(
           material: '运输费用',
           spec: Array.from(new Set(transportSources
             .map((record) => record.document.docCode)
-            .filter(Boolean))).join(' / ') || (imputedFreight > 0 ? '按运费口径' : '独立运输记录'),
-          supplier: Array.from(new Set(carriers.filter(Boolean))).join(' / ') || '待补充承运单位',
-          purchaseQuantity: Math.max(transportSources.length, 1),
+            .filter(Boolean))).join(' / ')
+            || purchaseFreightRows.map((item) => item.note).filter(Boolean).slice(0, 1).join('')
+            || '运输费用',
+          // 承运单位以运费行为准（V28 起存在行上、可人工覆盖），不再回头拼源单据
+          supplier: Array.from(new Set(purchaseFreightRows
+            .map((item) => item.carrierName)
+            .filter(Boolean))).join(' / ') || '待补充承运单位',
+          purchaseQuantity: Math.max(purchaseFreightRows.length, transportSources.length, 1),
           purchaseUnit: '笔',
           purchaseAmount: totalFreight,
           deliveredPackages: 0,
@@ -646,9 +665,18 @@ function buildGroups(
         purchaseSalesFreight: summaryLedgerRow?.purchaseSalesFreight == null
           ? undefined
           : salesFreight,
+        salesFreightDetail: (summaryLedgerRow?.freightItems ?? [])
+          .filter((item) => item.side === 'sales')
+          .map((item) => item.note || '')
+          .filter(Boolean)
+          .join('；'),
+        freightItems: summaryLedgerRow?.freightItems ?? [],
         deliveryCostPendingCount: summaryLedgerRow?.deliveryCostPendingCount == null
           ? undefined
           : Number(summaryLedgerRow.deliveryCostPendingCount),
+        purchaseMarginGap: summaryLedgerRow?.purchaseMarginGap == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseMarginGap),
         projectManager: summaryLedgerRow?.projectManager || '',
         status: materialBalanced
           && transportBalanced
@@ -763,6 +791,8 @@ export function ReconciliationLedgerPage({
     projectManager: '',
     isMonthlySettlement: false
   });
+  // 运费行承运单位草稿（编辑台账时逐行改，保存一次性提交）
+  const [freightDraft, setFreightDraft] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
     api.ledgerColumns()
@@ -817,6 +847,12 @@ export function ReconciliationLedgerPage({
     (sum, group) => sum + (group.deliveryCostPendingCount || 0), 0);
   const beginSummaryEdit = (group: BatchGroup) => {
     setEditingBatchId(group.key);
+    // 承运单位草稿：运费行 id → 输入值（V28 起存在运费行上，可逐行改）
+    setFreightDraft(Object.fromEntries(
+      (group.freightItems ?? [])
+        .filter((item) => item.side === 'purchase')
+        .map((item) => [item.id, item.carrierName ?? ''])
+    ));
     setSummaryDraft({
       receiptDate: group.receiptDate,
       salesOrder: group.salesOrder,
@@ -829,6 +865,7 @@ export function ReconciliationLedgerPage({
   const saveSummary = async (group: BatchGroup) => {
     setSavingBatchId(group.key);
     try {
+      // 主体字段先保存：它的失败由上层 toast 提示，不受承运单位影响
       await onUpdateBatch(group.key, {
         salesOrder: summaryDraft.salesOrder,
         salesAmount: Number(summaryDraft.salesAmount || 0),
@@ -838,6 +875,22 @@ export function ReconciliationLedgerPage({
         isMonthlySettlement: summaryDraft.isMonthlySettlement
       });
       setEditingBatchId('');
+      // 承运单位单独提交（只提交改过的行）：失败只提示，不回滚已保存的主体字段
+      const carriers: Record<string, string> = {};
+      for (const item of group.freightItems ?? []) {
+        if (item.side !== 'purchase') continue;
+        const draft = freightDraft[item.id];
+        if (draft !== undefined && draft !== (item.carrierName ?? '')) {
+          carriers[item.id] = draft;
+        }
+      }
+      if (Object.keys(carriers).length > 0) {
+        try {
+          await api.updateFreightCarriers(group.key, carriers);
+        } catch (error) {
+          onToast(error instanceof Error ? error.message : '承运单位保存失败');
+        }
+      }
     } finally {
       setSavingBatchId('');
     }
@@ -928,7 +981,7 @@ export function ReconciliationLedgerPage({
                 </tr>
               )) : (
                 <tr className="group-head">
-                  <th colSpan={36}>
+                  <th colSpan={37}>
                     {columnsError ? '表头定义加载失败，请刷新重试' : '表头加载中…'}
                   </th>
                 </tr>
@@ -1028,7 +1081,7 @@ export function ReconciliationLedgerPage({
                         <td
                           rowSpan={renderRowCount}
                           className="merged-finance-cell"
-                          title="按批次默认销售口径与采购明细推算：估算货款 + 客户承担送货运费 − 材料采购 − 采购运费（毛利率口径的销售价按采购价倒推，上浮口径按网价+上浮）"
+                          title="销售额（送货量 × 销售价）+ 客户承担送货运费 − 采购成本（采购单价 × 送货重量）− 采购运费；毛利率 = 毛利 ÷（销售额 + 送货运费）"
                         >
                           {group.purchaseMarginAmount != null
                             ? <LedgerMoney
@@ -1117,6 +1170,20 @@ export function ReconciliationLedgerPage({
                         </>
                       )}
                       {first && (
+                        <td
+                          rowSpan={renderRowCount}
+                          className="merged-finance-cell"
+                          title="采购毛利差额：按采购量估算的货款 − 按送货量的实际货款。正数=送货少于采购，实际毛利低于账面估算；还没有送货单时显示 -"
+                        >
+                          {group.purchaseMarginGap != null
+                            ? <LedgerMoney
+                                value={group.purchaseMarginGap}
+                                tone={group.purchaseMarginGap < 0 ? 'amount-pending' : ''}
+                              />
+                            : '-'}
+                        </td>
+                      )}
+                      {first && (
                         <>
                           <td rowSpan={renderRowCount} className="merged-receipt-cell editable-summary-cell">
                             {editingBatchId === group.key
@@ -1157,7 +1224,9 @@ export function ReconciliationLedgerPage({
                           <td
                             rowSpan={renderRowCount}
                             className="merged-receipt-cell"
-                            title="销售运费（客户承担）：已包含在左侧销售总金额里，不再另加；为 0 表示售价含运费或客户不另付"
+                            title={group.salesFreightDetail
+                              ? `销售运费（客户承担）：${group.salesFreightDetail}。已包含在左侧销售总金额里，不再另加`
+                              : '销售运费（客户承担）：已包含在左侧销售总金额里，不再另加；为 0 表示售价含运费、客户不另付，或还没配销售运费口径'}
                           >
                             {group.purchaseSalesFreight != null && group.purchaseSalesFreight > 0
                               ? <LedgerMoney value={group.purchaseSalesFreight} />
@@ -1255,7 +1324,21 @@ export function ReconciliationLedgerPage({
                           <td />
                           <td><strong>{entry.source}</strong></td>
                           <td>{entry.code || '—'}</td>
-                          <td>{entry.party || '—'}</td>
+                          <td>
+                            {editingBatchId === group.key && freightDraft[entry.key] !== undefined
+                              ? (
+                                <input
+                                  className="freight-carrier-input"
+                                  value={freightDraft[entry.key]}
+                                  placeholder="承运单位"
+                                  onChange={(event) => setFreightDraft({
+                                    ...freightDraft,
+                                    [entry.key]: event.target.value
+                                  })}
+                                />
+                              )
+                              : (entry.party || '—')}
+                          </td>
                           <td>1 笔</td>
                           <td><LedgerMoney value={entry.amount} /></td>
                           <td><LedgerDate value={entry.date} /></td>

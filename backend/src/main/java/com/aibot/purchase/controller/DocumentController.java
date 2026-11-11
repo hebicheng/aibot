@@ -232,4 +232,14 @@ public class DocumentController {
     return ApiResponse.ok(ledgerService.updateBatchSummary(
         CurrentUser.get().id(), batchId, edits));
   }
+
+  /** 人工改运费行的承运单位（按行改：运费行 id → 承运单位，空串表示清空回到「待补充」）。 */
+  @PutMapping("/ledger/batch/{batchId}/freight-carriers")
+  public ApiResponse<List<LedgerRecord>> updateFreightCarriers(
+      @PathVariable String batchId,
+      @RequestBody Map<String, String> carriers
+  ) {
+    return ApiResponse.ok(ledgerService.updateFreightCarriers(
+        CurrentUser.get().id(), batchId, carriers));
+  }
 }

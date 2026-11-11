@@ -19,8 +19,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -532,20 +535,40 @@ public class MaterialMarketMatchService {
   }
 
   /** 候选规格清单（人工绑定下拉用）。 */
-  public List<String> candidateSpecs(String productCode) {
+  public List<Map<String, Object>> candidateSpecs(String productCode) {
     if (!StringUtils.hasText(productCode)) {
       return List.of();
     }
     LocalDate date = latestQuoteDate();
-    return quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
-            .eq(MarketQuote::getQuoteDate, date)
-            .eq(MarketQuote::getProductCode, productCode)
-            .select(MarketQuote::getSpecName)
-            .last("LIMIT 200"))
-        .stream()
-        .map(MarketQuote::getSpecName)
-        .distinct()
-        .toList();
+    // 同一规格可能同时有 mysteel（权威/人工导入）和 gtgqw（爬取）两份，绑定只钉产品+规格，
+    // 取价日由单据日期自动解析——候选里能帮用户区分的只有来源渠道，不是日期（2026-11-11）
+    List<MarketQuote> quotes = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
+        .eq(MarketQuote::getQuoteDate, date)
+        .eq(MarketQuote::getProductCode, productCode)
+        .select(MarketQuote::getSpecName, MarketQuote::getSource, MarketQuote::getPrice)
+        .last("LIMIT 400"));
+    Map<String, Map<String, Object>> bySpec = new LinkedHashMap<>();
+    for (MarketQuote quote : quotes) {
+      if (!StringUtils.hasText(quote.getSpecName())) {
+        continue;
+      }
+      Map<String, Object> row = bySpec.computeIfAbsent(quote.getSpecName(), spec -> {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("spec", spec);
+        item.put("sources", new LinkedHashSet<String>());
+        item.put("price", null);
+        return item;
+      });
+      if (StringUtils.hasText(quote.getSource())) {
+        @SuppressWarnings("unchecked")
+        Set<String> sources = (Set<String>) row.get("sources");
+        sources.add(quote.getSource());
+      }
+      if (row.get("price") == null && quote.getPrice() != null) {
+        row.put("price", quote.getPrice());
+      }
+    }
+    return new ArrayList<>(bySpec.values());
   }
 
   /**

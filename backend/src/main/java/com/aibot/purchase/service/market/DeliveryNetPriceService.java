@@ -65,6 +65,7 @@ public class DeliveryNetPriceService {
   /** 毛利率口径的采购价来源（送货单明细 → 同批次采购单吨价）。 */
   private final PurchaseCostResolver costResolver;
   private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+  private final com.aibot.purchase.service.FreightService freightService;
 
   /** 默认销售上浮（全局配置，默认 30；仅作为无定价指令时的缺省，只影响之后确认的送货单）。 */
   @Value("${purchase.sales-uplift:30}")
@@ -180,7 +181,8 @@ public class DeliveryNetPriceService {
       com.aibot.purchase.mapper.BatchMapper batchMapper,
       BatchHintService batchHintService,
       PurchaseCostResolver costResolver,
-      com.fasterxml.jackson.databind.ObjectMapper objectMapper
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+      com.aibot.purchase.service.FreightService freightService
   ) {
     this.itemMapper = itemMapper;
     this.mappingMapper = mappingMapper;
@@ -194,6 +196,7 @@ public class DeliveryNetPriceService {
     this.batchHintService = batchHintService;
     this.costResolver = costResolver;
     this.objectMapper = objectMapper;
+    this.freightService = freightService;
   }
 
   /** 锁定结果摘要：matched=按口径定价行数 / fallback=回退单据金额行数 / pending=待 AI 兜底行数 /
@@ -739,9 +742,6 @@ public class DeliveryNetPriceService {
         .in(Document::getStatus, "matched", "archived")
         .orderByAsc(Document::getDocDate)
         .orderByAsc(Document::getCreatedAt));
-    Map<String, Object> hints = batchHintService.deliveryNoteHints(
-        batchMapper.selectById(batchId));
-    boolean first = true;
     for (Document doc : deliveries) {
       BigDecimal before = ledgerService.deliveryContributedSales(
           doc, itemMapper.selectList(Wrappers.<DocumentItem>lambdaQuery()
@@ -749,10 +749,6 @@ public class DeliveryNetPriceService {
       // 先补运费再重锁价格：before 用旧运费、after 用新运费，差额才会正确进台账
       // （2026-11-04 方案 B：采购运费不再写进送货单，运输费用列由 LedgerService.recalcFreight
       //  按批次统一重算；这里只补客户承担的销售运费）
-      // claimTrip：元/趟是整批包干价，只能记一次——挂在本批次第一张送货单上，其余置 0，
-      // 否则 N 张送货单会各收一趟，销售总金额被放大（2026-11-06）
-      applySalesFreightDefault(doc, hints, forceFreight, first);
-      first = false;
       LockResult result = lockPrices(doc);
       BigDecimal after = ledgerService.deliveryContributedSales(
           doc, itemMapper.selectList(Wrappers.<DocumentItem>lambdaQuery()
@@ -791,70 +787,6 @@ public class DeliveryNetPriceService {
       log.warn("structuredData 序列化失败：{}", e.getMessage());
       return null;
     }
-  }
-
-  /**
-   * 按批次口径补销售运费（客户承担的那笔，写进送货单 sales_freight）。
-   *
-   * <p>跳过两种情况：① 单据说明/备注自己报了运费（附带信息优先）；
-   * ② 非强刷且已有值（人工在单据上填过的不动）——唯一例外是旧逻辑留下的「元/趟按张数各收一遍」，
-   * 非承担单上恰好等于口径值的会被清零纠正，总额因此回到「只收一趟」。
-   *
-   * @param claimTrip 元/趟口径下由哪张送货单承担这笔包干价：false 的单一律 0，
-   *                  因为「一趟」是整批一次的钱，不能每张单都收（2026-11-06）
-   */
-  private void applySalesFreightDefault(Document doc, Map<String, Object> hints, boolean force,
-                                        boolean claimTrip) {
-    if (hints == null || hints.isEmpty()) {
-      return;
-    }
-    if (BatchHintService.mentionsFreight(
-        (doc.getGuidanceText() == null ? "" : doc.getGuidanceText()) + " "
-            + (doc.getRemark() == null ? "" : doc.getRemark()))) {
-      return;
-    }
-    BigDecimal perTrip = BatchHintService.decimal(
-        hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TRIP));
-    BigDecimal perTon = BatchHintService.decimal(
-        hints.get(BatchHintService.KEY_SALES_FREIGHT_PER_TON));
-    if (perTrip == null && perTon == null) {
-      return;
-    }
-    // 口径显式为 0 = 用户明确「不另计销售运费（含在售价里）」：任何一次重算都要把单据上的旧值清掉，
-    // 否则 batchSalesFreight 读单据实体现值时仍会拿到旧的运费（2026-11-06）
-    boolean explicitZero = (perTrip != null && perTrip.signum() == 0)
-        || (perTon != null && perTon.signum() == 0);
-    if (!force && !explicitZero && doc.getSalesFreight() != null) {
-      // 历史包袱：口径是元/趟时，旧逻辑给每张送货单都写了这个值（N 张=收 N 趟）。
-      // 非承担单上恰好等于口径值的，视为旧值清零——首单保留，总额从 N 倍回到 1 倍。
-      boolean legacyTripOnNonClaim = perTrip != null && !claimTrip
-          && doc.getSalesFreight().compareTo(perTrip) == 0;
-      if (!legacyTripOnNonClaim) {
-        return;
-      }
-    }
-    BigDecimal value;
-    if (perTrip != null) {
-      value = claimTrip ? perTrip : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-    } else {
-      BigDecimal tons = deliveryTons(doc.getId());
-      if (tons == null || tons.signum() <= 0) {
-        // 0 口径没有吨数也要落 0：否则单据上的旧运费留着，batchSalesFreight 读实体会盖住口径
-        if (!explicitZero) {
-          return;
-        }
-        value = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-      } else {
-        value = perTon.multiply(tons).setScale(2, RoundingMode.HALF_UP);
-      }
-    }
-    BigDecimal current = doc.getSalesFreight() == null ? BigDecimal.ZERO : doc.getSalesFreight();
-    if (current.compareTo(value) == 0) {
-      return;
-    }
-    doc.setSalesFreight(value);
-    documentMapper.updateById(doc);
-    log.info("送货单 {} 销售运费按批次口径补算：{}（原 {}）", doc.getId(), value, current);
   }
 
   /** 送货单明细计价吨数合计：计价单位为吨的行才累加；一行都没有返回 null。 */
@@ -912,6 +844,9 @@ public class DeliveryNetPriceService {
         .in(Document::getStatus, "matched", "archived")
         .orderByAsc(Document::getDocDate)
         .orderByAsc(Document::getCreatedAt));
+    // 销售运费一律读运费表（口径行 + 单据写明行），与台账销售总金额同源（2026-11-11）
+    List<com.aibot.purchase.entity.FreightItem> salesFreightRows =
+        freightService.list(batchId, com.aibot.purchase.service.FreightService.SIDE_SALES);
     List<Map<String, Object>> rows = new ArrayList<>();
     for (Document doc : deliveries) {
       if (!userId.equals(doc.getUserId())) {
@@ -956,35 +891,53 @@ public class DeliveryNetPriceService {
         row.put("rowType", "item");
         rows.add(row);
       }
-      // 销售运费条目：该送货单填写了销售运费时，在明细行后追加一行（进台账销售总金额）
-      if (doc.getSalesFreight() != null
-          && doc.getSalesFreight().compareTo(BigDecimal.ZERO) > 0) {
-        Map<String, Object> freightRow = new LinkedHashMap<>();
-        freightRow.put("mappingId", null);
-        freightRow.put("documentId", doc.getId());
-        freightRow.put("docCode", doc.getDocCode());
-        freightRow.put("docDate", doc.getDocDate() == null ? null : doc.getDocDate().toString());
-        freightRow.put("materialName", "销售运费");
-        freightRow.put("spec", null);
-        freightRow.put("quoteSource", null);
-        freightRow.put("quoteSpecName", null);
-        freightRow.put("quoteDate", null);
-        freightRow.put("quotePrice", null);
-        freightRow.put("costPrice", null);
-        freightRow.put("costLevel", null);
-        freightRow.put("uplift", null);
-        freightRow.put("salesUnitPrice", null);
-        freightRow.put("pricingQuantity", null);
-        freightRow.put("pricingUnit", null);
-        freightRow.put("amount", doc.getSalesFreight());
-        freightRow.put("priceBasis", "sales_freight");
-        freightRow.put("status", "freight");
-        freightRow.put("pricingNote", null);
-        freightRow.put("rowType", "sales_freight");
-        rows.add(freightRow);
+      // 该送货单的销售运费（运费表里挂在这张单上的行合计）
+      BigDecimal docFreight = salesFreightRows.stream()
+          .filter(freight -> doc.getId().equals(freight.getSourceDocumentId()))
+          .map(com.aibot.purchase.entity.FreightItem::getAmount)
+          .reduce(BigDecimal.ZERO, BigDecimal::add);
+      if (docFreight.compareTo(BigDecimal.ZERO) > 0) {
+        rows.add(salesFreightDetailRow(doc, docFreight, "销售运费", "sales_freight"));
       }
     }
+    // 口径运费是批次级的一笔，不挂在任何单据上：单独一行，保证明细合计 = 销售总金额
+    BigDecimal policyFreight = salesFreightRows.stream()
+        .filter(freight -> freight.getSourceDocumentId() == null)
+        .map(com.aibot.purchase.entity.FreightItem::getAmount)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    if (policyFreight.compareTo(BigDecimal.ZERO) > 0) {
+      rows.add(salesFreightDetailRow(null, policyFreight, "销售运费（按口径）", "sales_freight_policy"));
+    }
     return rows;
+  }
+
+  /** 销售明细里的运费条目：字段与材料行对齐，前端按 status=freight 只读展示。 */
+  private Map<String, Object> salesFreightDetailRow(
+      Document doc, BigDecimal amount, String materialName, String priceBasis) {
+    Map<String, Object> row = new LinkedHashMap<>();
+    row.put("mappingId", null);
+    row.put("documentId", doc == null ? null : doc.getId());
+    row.put("docCode", doc == null ? null : doc.getDocCode());
+    row.put("docDate", doc == null || doc.getDocDate() == null
+        ? null : doc.getDocDate().toString());
+    row.put("materialName", materialName);
+    row.put("spec", null);
+    row.put("quoteSource", null);
+    row.put("quoteSpecName", null);
+    row.put("quoteDate", null);
+    row.put("quotePrice", null);
+    row.put("costPrice", null);
+    row.put("costLevel", null);
+    row.put("uplift", null);
+    row.put("salesUnitPrice", null);
+    row.put("pricingQuantity", null);
+    row.put("pricingUnit", null);
+    row.put("amount", amount);
+    row.put("priceBasis", priceBasis);
+    row.put("status", "freight");
+    row.put("pricingNote", null);
+    row.put("rowType", "sales_freight");
+    return row;
   }
 
   /**

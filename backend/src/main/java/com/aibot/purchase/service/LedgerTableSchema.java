@@ -14,9 +14,10 @@ import java.util.List;
  * 采购毛利金额 11（= 估算货款 + 客户承担送货运费 − 材料采购 − 采购运费）、
  * 采购毛利率 12=采购毛利金额 ÷（估算货款 + 送货运费），总额法），
  * 13-19 采购与付款（请款 13、付款记录 14-16、进项发票 17-19），
- * 20-33 销售与收款（销售订单号 20、销售总金额 21、销售运费 22、开票 23-25、收款 26-27、
- * 到款日期 28、要求回款日期 29、月结利息 30、毛利 31、毛利率 32、项目经理 33），
- * 34 状态，35 操作。
+ * 20 采购毛利差额（2026-11-11 新增：采购量 vs 送货量的毛利差），
+ * 21-34 销售与收款（销售订单号 21、销售总金额 22、销售运费 23、开票 24-26、收款 27-28、
+ * 到款日期 29、要求回款日期 30、月结利息 31、毛利 32、毛利率 33、项目经理 34），
+ * 35 状态，36 操作。
  * 「操作」列仅供页面使用（exportable=false），导出不含该列。
  * 销售定价说明不在台账列展示，进「销售总金额」明细弹框逐行显示（2026-09-21 定）。
  *
@@ -55,7 +56,7 @@ public final class LedgerTableSchema {
           HeaderCell.of("项目与批次", 1, 2, "sticky-context-group head-group-context"),
           HeaderCell.of("业务分类", 1, 1, "head-group-category"),
           HeaderCell.of("材料采购 / 运输费用 / 实际送达", 1, 10, "head-group-material"),
-          HeaderCell.of("采购与付款", 1, 7, "head-group-purchase-finance"),
+          HeaderCell.of("采购与付款", 1, 8, "head-group-purchase-finance"),
           HeaderCell.of("销售与收款", 1, 14, "head-group-sales"),
           HeaderCell.of("状态", 3, 1, "head-group-status"),
           HeaderCell.pageOnly("操作", 3, 1, "sticky-action head-group-action")
@@ -78,6 +79,8 @@ public final class LedgerTableSchema {
           HeaderCell.of("请款", 1, 1, "head-group-request"),
           HeaderCell.of("付款记录", 1, 3, "head-group-payment"),
           HeaderCell.of("进项发票", 1, 3, "head-group-invoice"),
+          // 2026-11-11 新增：采购量与送货量不一致导致的毛利差额（按采购量估算 − 按送货量实际）
+          HeaderCell.of("采购毛利差额", 2, 1, "head-purchase-gap"),
           HeaderCell.of("销售订单号", 2, 1, "head-sales"),
           HeaderCell.of("销售总金额", 2, 1, "head-sales"),
           HeaderCell.of("销售运费", 2, 1, "head-sales"),
@@ -108,7 +111,7 @@ public final class LedgerTableSchema {
   );
 
   /** 导出 xlsx 的数据列数（不含页面专属的「操作」列）。 */
-  public static final int EXPORT_COLUMN_COUNT = 35;
+  public static final int EXPORT_COLUMN_COUNT = 36;
 
   private LedgerTableSchema() {
   }
