@@ -17,6 +17,18 @@ const money = (value: number) =>
 const quantity = (value: number) =>
   new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3 }).format(value || 0);
 
+/**
+ * 金额是否「显示上不同」（按分比较）。
+ * 直接比较浮点差有坑：2.78 − 2.77 在 IEEE754 下是 0.009999999999999787，
+ * 用 `>= 0.01` 判定会漏掉这一分钱，括号就不显示了。四舍五入到分再比才可靠。
+ */
+const moneyDiffers = (a?: number | null, b?: number | null) =>
+  a != null && b != null && Math.round(a * 100) !== Math.round(b * 100);
+
+/** 吨数是否不同（按 0.0001 吨比较，与后端超供判定同阈值）。 */
+const tonsDiffer = (a?: number | null, b?: number | null) =>
+  a != null && b != null && Math.round(a * 10000) !== Math.round(b * 10000);
+
 /** 销售单价的口径标注：数值旁边的小字（人工价 / 毛利率 / 上浮） */
 const salesPriceLabel = (basis: string | null) =>
   basis === 'manual' ? '人工价' : basis === 'margin' ? '毛利率' : basis === 'uplift' ? '上浮' : '';
@@ -43,6 +55,183 @@ function LedgerMoney({
   tone?: 'amount-completed' | 'amount-pending' | '';
 }) {
   return <span className={`ledger-money-value ${tone}`.trim()}>{money(value)}</span>;
+}
+
+/**
+ * 采购侧金额：实际送达量算出的值 + 括号里的计划值（2026-11-12 定）。
+ *
+ * <p>括号只在两者不一致时出现（吨数差 > 0.0001 或金额差 ≥ 一分钱）——送货量与采购量
+ * 完全一致的批次不重复显示同一个数，只保留干净的金额。
+ */
+function AmountWithPlan({
+  value,
+  plan,
+  tons,
+  deliveredTons,
+  hint,
+  tone = ''
+}: {
+  value: number | null;
+  plan?: number;
+  tons?: number;
+  deliveredTons?: number;
+  hint?: string;
+  tone?: 'amount-completed' | 'amount-pending' | '';
+}) {
+  if (value == null) {
+    return <span className="ledger-date-value">-</span>;
+  }
+  const showsPlan = plan != null && plan > 0
+    && (moneyDiffers(plan, value) || tonsDiffer(tons, deliveredTons));
+  return (
+    <>
+      <LedgerMoney value={value} tone={tone} />
+      {showsPlan && (
+        <small className="ledger-plan-note" title={hint}>（计划 {money(plan)}）</small>
+      )}
+    </>
+  );
+}
+
+/** 金额单元格括号的悬停说明：把吨数与算式讲清楚，替代在格子里塞一堆字。 */
+function planAmountHint(row: DetailRow): string {
+  if (row.kind === 'transport') {
+    return '实际运费按送货单送达吨数计算（元/吨口径）；括号内为按采购单计划吨数还原的运费，'
+      + '元/趟包干价与单据写明的运费不随量变化。差额见「采购运费差额」列。';
+  }
+  const tons = row.purchaseTons ?? 0;
+  const delivered = row.deliveredTons ?? 0;
+  const gap = (row.purchaseAmountPlan ?? 0) - (row.purchaseAmount ?? 0);
+  // 多材料大类的汇总行：各大类吨价不同，写单一吨价会算不平，只用合计吨数说明
+  if (row.material.includes('大类')) {
+    return `实际 = 各大类送达吨数 × 各自采购吨价（合计 ${quantity(delivered)} 吨）；`
+      + `括号内为采购单计划量（合计 ${quantity(tons)} 吨），差额 ${money(gap)} 见「采购金额差额」列。`;
+  }
+  return `实际 = 送达 ${quantity(delivered)} 吨 × 采购吨价；括号内为采购单计划量 ${quantity(tons)} 吨 × 同一吨价，`
+    + `差额 ${money(gap)} 见「采购金额差额」列。`
+    + (row.basisFallback ? ' 本大类部分送货行按整批均价估算。' : '')
+    + (row.basisUnpriced ? ' 部分采购行缺吨数，金额按原值计入。' : '');
+}
+
+/** 差额列单元格：0 与空都显示「-」，避免整列 0.00 噪声。 */
+function LedgerGap({ value }: { value?: number }) {
+  if (value == null || value === 0) {
+    return <span className="ledger-date-value">-</span>;
+  }
+  return <LedgerMoney value={value} tone={value < 0 ? 'amount-pending' : ''} />;
+}
+
+/**
+ * 计划 / 实际差额计算详情：四步算式 + 自校验 + 逐材料大类明细。
+ * 数据全部来自批次级瞬时值（后端 supplyMargin），与三列差额同源。
+ */
+function GapDetailPopover({ group, onClose }: { group: BatchGroup; onClose: () => void }) {
+  const planTons = group.materialCostBasis.reduce((sum, row) => sum + row.planTons, 0);
+  const deliveredTons = group.materialCostBasis.reduce((sum, row) => sum + row.deliveredTons, 0);
+  const planAmount = group.purchasePlanAmount ?? 0;
+  const actualAmount = group.materialCostBasis.reduce((sum, row) => sum + row.actualAmount, 0);
+  const planFreight = group.purchaseFreightPlan ?? 0;
+  const actualFreight = group.purchaseFreightCost ?? 0;
+  const revenueGap = group.purchaseRevenueGap;
+  const amountGap = group.purchaseAmountGap;
+  const freightGap = group.purchaseFreightGap;
+  const marginGap = group.purchaseMarginGap;
+  const estimateNote = group.purchaseUnpricedDeliveryRows
+    ? `有 ${group.purchaseUnpricedDeliveryRows} 行送货明细算不出吨数，未计入实际成本`
+    : '';
+  return (
+    <div className="ledger-detail-overlay" onClick={onClose}>
+      <div
+        className="ledger-detail-popover wide"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="ledger-detail-head">
+          <div>
+            <strong>计划 / 实际差额计算详情</strong>
+            <small>{group.project} · {group.batch}{estimateNote ? ` · ${estimateNote}` : ''}</small>
+          </div>
+          <button type="button" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="ledger-detail-list">
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">① 采购计划金额</span>
+            <span className="ledger-detail-row-meta">
+              采购单合计 {quantity(planTons)} 吨，按各大类采购吨价
+            </span>
+            <strong>{money(planAmount)}</strong>
+          </div>
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">② 实际送达成本</span>
+            <span className="ledger-detail-row-meta">
+              送货单合计 {quantity(deliveredTons)} 吨 × 同一吨价
+            </span>
+            <strong>{money(actualAmount)}</strong>
+          </div>
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">③ 采购金额差额</span>
+            <span className="ledger-detail-row-meta">① − ②，少送的货不计本批成本</span>
+            <strong><LedgerGap value={amountGap} /></strong>
+          </div>
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">④ 采购运费</span>
+            <span className="ledger-detail-row-meta">
+              计划 {money(planFreight)}（元/吨口径 × 采购吨数）− 实际 {money(actualFreight)}（× 送达吨数）
+            </span>
+            <strong><LedgerGap value={freightGap} /></strong>
+          </div>
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">⑤ 收入差</span>
+            <span className="ledger-detail-row-meta">按采购量估算的货款 − 按送货量的实际货款</span>
+            <strong><LedgerGap value={revenueGap} /></strong>
+          </div>
+          <div className="ledger-detail-row">
+            <span className="ledger-detail-row-note">⑥ 毛利差额</span>
+            <span className="ledger-detail-row-meta">⑤ − ③ − ④（少送少赚的部分）</span>
+            <strong><LedgerGap value={marginGap} /></strong>
+          </div>
+        </div>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>材料大类</th>
+                <th>采购吨数</th>
+                <th>送达吨数</th>
+                <th>差量</th>
+                <th>采购吨价</th>
+                <th>计划金额</th>
+                <th>实际金额</th>
+                <th>差额</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.materialCostBasis.map((row) => {
+                const note = row.unpriced
+                  ? '采购行缺吨数，金额按原值计入'
+                  : row.fallbackPriced
+                    ? '部分送货行按整批均价估算'
+                    : '';
+                return (
+                  <tr key={row.category}>
+                    <td>{row.category}</td>
+                    <td>{quantity(row.planTons)}</td>
+                    <td>{quantity(row.deliveredTons)}</td>
+                    <td>{quantity(row.planTons - row.deliveredTons)}</td>
+                    <td>{row.unitPrice == null ? '-' : money(row.unitPrice)}</td>
+                    <td>{money(row.planAmount)}</td>
+                    <td>{money(row.actualAmount)}</td>
+                    <td><LedgerGap value={row.planAmount - row.actualAmount} /></td>
+                    <td>{note || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function LedgerDate({ value }: { value?: string }) {
@@ -96,6 +285,14 @@ type DetailRow = FinancialSummary & {
   // 材料行：明细行无金额时为 null（展示空白），不参与未付款基线；
   // 运输行：始终为数值。
   purchaseAmount: number | null;
+  // 括号里的计划值（按采购单计划量算出）；undefined/0=无计划值可比，不显示括号
+  purchaseAmountPlan?: number;
+  // 计划吨数 / 送达吨数（括号 tooltip 用）
+  purchaseTons?: number;
+  deliveredTons?: number;
+  // 实际值是按整批均价 / 缺吨数原值估算的
+  basisFallback?: boolean;
+  basisUnpriced?: boolean;
   deliveredPackages: number;
   deliveredPackageUnit: string;
   deliveredWeight: number;
@@ -105,6 +302,18 @@ type DetailRow = FinancialSummary & {
   sourceTag?: 'delivery';
   // 仅运输行使用：构成明细
   details?: TransportDetailEntry[];
+};
+
+/** 采购成本基准的一行（逐材料大类），差额详情弹框与材料行括号共用。 */
+type MaterialCostBasisRow = {
+  category: string;
+  planTons: number;
+  planAmount: number;
+  deliveredTons: number;
+  actualAmount: number;
+  unitPrice?: number;
+  fallbackPriced?: boolean;
+  unpriced?: boolean;
 };
 
 type BatchGroup = {
@@ -125,6 +334,8 @@ type BatchGroup = {
   materialRequested: FinanceDetailEntry[];
   transportRequested: FinanceDetailEntry[];
   totalPurchase: number;
+  /** 总额的计划值（材料计划 + 计划运费）：与实际不一致时才在括号里显示 */
+  totalPurchasePlan?: number;
   totalRequested: number;
   totalPaid: number;
   totalUnpaid: number;
@@ -158,6 +369,9 @@ type BatchGroup = {
   // 采购毛利（批次级，后端现算瞬时值；undefined=无口径或无有效行，显示 -；成本含运费）
   purchaseMarginAmount?: number;
   purchaseMarginRate?: number;
+  // 毛利的计划值（按采购单计划量与计划运费算）：括号里展示的就是它
+  purchaseMarginPlanAmount?: number;
+  purchaseMarginPlanRate?: number;
   // 毛利算不出的原因：no_policy=缺定价口径 no_supply=无已确认采购单 no_priced_row=明细缺吨数或金额
   purchaseMarginNote?: string;
   // 采购运费成本（批次级）：运输单合计 > 送货单采购运费 > 批次运费口径推算
@@ -168,8 +382,22 @@ type BatchGroup = {
   salesFreightDetail?: string;
   // 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额
   deliveryCostPendingCount?: number;
-  // 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单
+  // 采购毛利差额（批次级，2026-11-12 改语义）：按计划量的毛利 − 按实际送达量的毛利
   purchaseMarginGap?: number;
+  // 收入差（批次级）：按采购量估算货款 − 按送货量实际锁定货款
+  purchaseRevenueGap?: number;
+  // 采购计划金额（批次级）：括号里展示的采购单口径金额
+  purchasePlanAmount?: number;
+  // 采购金额差额（批次级）= 采购计划金额 − 实际送达成本
+  purchaseAmountGap?: number;
+  // 计划运费 / 采购运费差额（批次级）
+  purchaseFreightPlan?: number;
+  purchaseFreightGap?: number;
+  // 批次是否有已确认送货单；送货明细里算不出吨数、未计入成本的行数
+  purchaseHasDelivery?: boolean;
+  purchaseUnpricedDeliveryRows?: number;
+  // 采购成本基准逐材料大类明细（差额详情弹框用）
+  materialCostBasis: MaterialCostBasisRow[];
   // 运费明细行（批次级）：口径/运输单/单据写明并列累加
   freightItems?: Array<{
     id: string;
@@ -295,6 +523,8 @@ function buildGroups(
       }
 
       const deliverySummary = summarizeBatchDelivery(batchRecords);
+      // 批次首条台账行 = 批次级瞬时值（采购毛利、差额、成本基准都挂在这里）
+      const summaryLedgerRow = batchLedger[0];
 
       const materialMap = new Map<string, DetailRow>();
       for (const supply of supplyRecords) {
@@ -392,6 +622,32 @@ function buildGroups(
       }
       const materialRows = [...Array.from(materialMap.values()), ...deliveryOnlyMap.values()];
 
+      // ---- 采购金额切到「实际送达量」口径（2026-11-12） ----
+      // 后端成本基准按材料大类给计划/实际两套金额，这里覆盖展示行的金额并带上括号用的计划值。
+      // 批次没有采购单时基准为空 → 保持原样（送货先行行金额仍留空，不用销售侧金额充采购）。
+      const materialCostBasis: MaterialCostBasisRow[] = summaryLedgerRow?.materialCostBasis ?? [];
+      const basisByCategory = new Map<string, MaterialCostBasisRow>();
+      for (const entry of materialCostBasis) {
+        const key = normalize(entry.category);
+        if (!basisByCategory.has(key)) {
+          basisByCategory.set(key, entry);
+        }
+      }
+      if (materialCostBasis.length > 0) {
+        for (const row of materialRows) {
+          const entry = basisByCategory.get(normalize(row.material));
+          if (!entry) {
+            continue;
+          }
+          row.purchaseAmountPlan = entry.planAmount;
+          row.purchaseAmount = entry.actualAmount;
+          row.purchaseTons = entry.planTons;
+          row.deliveredTons = entry.deliveredTons;
+          row.basisFallback = entry.fallbackPriced;
+          row.basisUnpriced = entry.unpriced;
+        }
+      }
+
       // 送货单 = 销售侧发货单：只有其上标注的运输费用（transportFee）参与运输费用行，
       // 销售金额走台账销售列（后端按送货单自动汇总，人工仍可改）。
       const deliveryFeeRecords = batchRecords.filter(
@@ -462,7 +718,6 @@ function buildGroups(
           : Number(record.document.amount || 0)),
         0
       );
-      const summaryLedgerRow = batchLedger[0];
       const ledgerFreight = Number(summaryLedgerRow?.purchaseFreightCost ?? 0);
       const totalFreight = ledgerFreight > 0 ? ledgerFreight : docFreight;
       // 运费行（采购侧）：口径 / 运输单 / 单据写明并列累加，构成明细直接读后端运费行（2026-11-11）
@@ -513,6 +768,8 @@ function buildGroups(
           purchaseQuantity: Math.max(purchaseFreightRows.length, transportSources.length, 1),
           purchaseUnit: '笔',
           purchaseAmount: totalFreight,
+          // 括号里的计划运费：元/吨口径按采购吨数还原，其余金额不随量变（后端算好下发）
+          purchaseAmountPlan: Number(summaryLedgerRow?.purchaseFreightPlan ?? totalFreight),
           deliveredPackages: 0,
           deliveredPackageUnit: '',
           deliveredWeight: 0,
@@ -547,6 +804,9 @@ function buildGroups(
       const summaryPurchaseAmount = allAmountsNull
         ? null
         : materialRows.reduce((sum, row) => sum + (row.purchaseAmount ?? 0), 0);
+      const summaryPurchaseAmountPlan = allAmountsNull
+        ? null
+        : materialRows.reduce((sum, row) => sum + (row.purchaseAmountPlan ?? 0), 0);
       const isDeliveredStatus = (status: string) => status === '已送达' || status === '超供送达';
       const summaryDeliveryStatus = materialRows.every((row) => isDeliveredStatus(row.deliveryStatus))
         ? materialRows.some((row) => row.deliveryStatus === '超供送达') ? '超供送达' : '已送达'
@@ -569,6 +829,7 @@ function buildGroups(
           ? materialRows[0].purchaseUnit
           : '合计',
         purchaseAmount: summaryPurchaseAmount,
+        purchaseAmountPlan: summaryPurchaseAmountPlan ?? undefined,
         deliveredPackages: materialRows.reduce((sum, row) => sum + row.deliveredPackages, 0),
         deliveredPackageUnit: materialRows.length === 1 ? materialRows[0].deliveredPackageUnit : '',
         deliveredWeight: materialRows.reduce((sum, row) => sum + row.deliveredWeight, 0),
@@ -591,6 +852,12 @@ function buildGroups(
         (sum, row) => sum + (row.purchaseAmount ?? 0),
         0
       );
+      // 总额的计划值：材料计划金额 + 计划运费（与括号里的两个数同源）
+      const planMaterial = materialRows.length > 0
+        ? materialRows.reduce((sum, row) => sum + (row.purchaseAmountPlan ?? 0), 0)
+        : 0;
+      const planFreight = Number(summaryLedgerRow?.purchaseFreightPlan ?? 0);
+      const totalPurchasePlan = planMaterial + planFreight;
       const totalPaid = materialFinance.paid + transportRows.reduce(
         (sum, row) => sum + row.paid,
         0
@@ -614,6 +881,31 @@ function buildGroups(
         || (materialFinance.unpaid <= 0 && materialFinance.invoice >= materialPurchase);
       const transportBalanced = transportRows.every((row) =>
         row.unpaid <= 0 && row.invoice >= (row.purchaseAmount ?? 0));
+      // 毛利的计划值（2026-11-12）：优先用后端下发的，缺失时按恒等式自算 ——
+      // 计划毛利 = 实际毛利 + 毛利差额；毛利率分母 = 实际货款 + 送货运费 + 收入差。
+      // 自算兜底能扛住「接口多了字段但前端映射还没一起更新」这类错位，不至于整块不显示。
+      const marginAmount = summaryLedgerRow?.purchaseMarginAmount == null
+        ? undefined
+        : Number(summaryLedgerRow.purchaseMarginAmount);
+      const marginGap = summaryLedgerRow?.purchaseMarginGap == null
+        ? undefined
+        : Number(summaryLedgerRow.purchaseMarginGap);
+      const marginPlanAmount = summaryLedgerRow?.purchaseMarginPlanAmount != null
+        ? Number(summaryLedgerRow.purchaseMarginPlanAmount)
+        : marginAmount != null && marginGap != null
+          ? Number((marginAmount + marginGap).toFixed(2))
+          : undefined;
+      const marginPlanRate = summaryLedgerRow?.purchaseMarginPlanRate != null
+        ? Number(summaryLedgerRow.purchaseMarginPlanRate)
+        : marginPlanAmount == null
+          ? undefined
+          : (() => {
+              const planSalesTotal = sales + salesFreight
+                + Number(summaryLedgerRow?.purchaseRevenueGap ?? 0);
+              return planSalesTotal > 0
+                ? Number((marginPlanAmount / planSalesTotal * 100).toFixed(2))
+                : undefined;
+            })();
 
       groups.push({
         key: batch.id,
@@ -630,6 +922,7 @@ function buildGroups(
         materialRequested,
         transportRequested,
         totalPurchase,
+        totalPurchasePlan,
         totalRequested,
         totalPaid,
         totalUnpaid,
@@ -652,12 +945,12 @@ function buildGroups(
         interestSummary: summaryLedgerRow?.interestSummary,
         grossProfit,
         grossMargin,
-        purchaseMarginAmount: summaryLedgerRow?.purchaseMarginAmount == null
-          ? undefined
-          : Number(summaryLedgerRow.purchaseMarginAmount),
+        purchaseMarginAmount: marginAmount,
         purchaseMarginRate: summaryLedgerRow?.purchaseMarginRate == null
           ? undefined
           : Number(summaryLedgerRow.purchaseMarginRate),
+        purchaseMarginPlanAmount: marginPlanAmount,
+        purchaseMarginPlanRate: marginPlanRate,
         purchaseMarginNote: summaryLedgerRow?.purchaseMarginNote ?? undefined,
         purchaseFreightCost: summaryLedgerRow?.purchaseFreightCost == null
           ? undefined
@@ -677,6 +970,24 @@ function buildGroups(
         purchaseMarginGap: summaryLedgerRow?.purchaseMarginGap == null
           ? undefined
           : Number(summaryLedgerRow.purchaseMarginGap),
+        purchaseRevenueGap: summaryLedgerRow?.purchaseRevenueGap == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseRevenueGap),
+        purchasePlanAmount: planMaterial > 0 ? planMaterial : undefined,
+        purchaseAmountGap: summaryLedgerRow?.purchaseAmountGap == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseAmountGap),
+        purchaseFreightPlan: summaryLedgerRow?.purchaseFreightPlan == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseFreightPlan),
+        purchaseFreightGap: summaryLedgerRow?.purchaseFreightGap == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseFreightGap),
+        purchaseHasDelivery: summaryLedgerRow?.purchaseHasDelivery,
+        purchaseUnpricedDeliveryRows: summaryLedgerRow?.purchaseUnpricedDeliveryRows == null
+          ? undefined
+          : Number(summaryLedgerRow.purchaseUnpricedDeliveryRows),
+        materialCostBasis,
         projectManager: summaryLedgerRow?.projectManager || '',
         status: materialBalanced
           && transportBalanced
@@ -753,6 +1064,8 @@ export function ReconciliationLedgerPage({
     rows: SalesDetailRow[];
   } | null>(null);
   const [salesDetailLoading, setSalesDetailLoading] = useState(false);
+  // 计划 / 实际差额计算详情弹框（2026-11-12）：三列差额同源的算式与逐材料大类明细
+  const [gapDetail, setGapDetail] = useState<BatchGroup | null>(null);
   // 材料清单弹框（只读概览，2026-11-04 职责单一化）：绑定/改价/AI 校准统一在「市场行情 · 批次材料」
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const [materialRows, setMaterialRows] = useState<MaterialRow[]>([]);
@@ -981,7 +1294,7 @@ export function ReconciliationLedgerPage({
                 </tr>
               )) : (
                 <tr className="group-head">
-                  <th colSpan={37}>
+                  <th colSpan={39}>
                     {columnsError ? '表头定义加载失败，请刷新重试' : '表头加载中…'}
                   </th>
                 </tr>
@@ -1049,9 +1362,13 @@ export function ReconciliationLedgerPage({
                       <td>{row.spec}</td>
                       <td>{row.supplier || '-'}</td>
                       <td>
-                        {row.purchaseAmount == null
-                          ? <span className="ledger-date-value">-</span>
-                          : <LedgerMoney value={row.purchaseAmount} />}
+                        <AmountWithPlan
+                          value={row.purchaseAmount}
+                          plan={row.purchaseAmountPlan}
+                          tons={row.purchaseTons}
+                          deliveredTons={row.deliveredTons}
+                          hint={planAmountHint(row)}
+                        />
                       </td>
                       <td>
                         {row.sourceTag === 'delivery' || row.purchaseQuantity <= 0
@@ -1073,8 +1390,12 @@ export function ReconciliationLedgerPage({
                           : <LedgerDate value={row.deliveryStatus} />}
                       </td>
                       {first && (
-                        <td rowSpan={renderRowCount} className="merged-finance-cell" title="材料采购金额 + 运输费用合计（运输费用行含运费单据与运费口径推算，我们付给承运方）">
-                          <LedgerMoney value={group.totalPurchase} />
+                        <td rowSpan={renderRowCount} className="merged-finance-cell" title="材料采购成本（采购吨价 × 实际送达吨数）+ 运输费用合计；括号内为按采购单计划量计算的总额">
+                          <AmountWithPlan
+                            value={group.totalPurchase}
+                            plan={group.totalPurchasePlan}
+                            hint="括号内为按采购单计划量与计划运费计算的总额；实际与计划的差 = 采购金额差额 + 采购运费差额。"
+                          />
                         </td>
                       )}
                       {first && (
@@ -1084,9 +1405,11 @@ export function ReconciliationLedgerPage({
                           title="销售额（送货量 × 销售价）+ 客户承担送货运费 − 采购成本（采购单价 × 送货重量）− 采购运费；毛利率 = 毛利 ÷（销售额 + 送货运费）"
                         >
                           {group.purchaseMarginAmount != null
-                            ? <LedgerMoney
+                            ? <AmountWithPlan
                                 value={group.purchaseMarginAmount}
+                                plan={group.purchaseMarginPlanAmount}
                                 tone={group.purchaseMarginAmount < 0 ? 'amount-pending' : ''}
+                                hint="括号内为按采购单计划量与计划运费计算的毛利；实际按送达量与实际运费计算，两者差即「采购毛利差额」。"
                               />
                             : <small className="amount-pending" title="采购毛利需要批次定价口径（销售价=网价+上浮 或 采购价÷(1−毛利率)）；没有定价口径就算不出毛利，运费仍按口径/运输单显示在运输费用行">
                                 {purchaseMarginHint(group.purchaseMarginNote) || '-'}
@@ -1102,14 +1425,55 @@ export function ReconciliationLedgerPage({
                         <td
                           rowSpan={renderRowCount}
                           className="merged-finance-cell"
-                          title="采购毛利金额 ÷（估算货款 + 客户承担送货运费）——分母是总收入，与销售区口径一致"
+                          title="采购毛利金额 ÷（估算货款 + 客户承担送货运费）——分母是总收入，与销售区口径一致；括号内为按采购单计划量算的毛利率"
                         >
                           <LedgerRate
                             value={group.purchaseMarginRate != null
                               ? `${quantity(group.purchaseMarginRate)}%`
                               : '-'}
                           />
+                          {moneyDiffers(group.purchaseMarginPlanRate, group.purchaseMarginRate) && (
+                              <small
+                                className="ledger-plan-note"
+                                title="括号内为按采购单计划量与计划运费计算的毛利率（分母 = 按计划量的估算货款 + 送货运费）。"
+                              >
+                                （计划 {quantity(group.purchaseMarginPlanRate ?? 0)}%）
+                              </small>
+                            )}
                         </td>
+                      )}
+                      {first && (
+                        <>
+                          <td
+                            rowSpan={renderRowCount}
+                            className="merged-finance-cell"
+                            title="采购金额差额 = 采购计划金额 − 实际送达成本。正数=送货少于采购，这部分货不计本批成本（留在库存）"
+                          >
+                            <LedgerGap value={group.purchaseAmountGap} />
+                          </td>
+                          <td
+                            rowSpan={renderRowCount}
+                            className="merged-finance-cell"
+                            title="采购运费差额 = 计划运费（元/吨口径 × 采购吨数）− 实际运费（× 送达吨数）。元/趟与单据写明的运费不随量变化，不产生差额"
+                          >
+                            <LedgerGap value={group.purchaseFreightGap} />
+                          </td>
+                          <td
+                            rowSpan={renderRowCount}
+                            className="merged-finance-cell"
+                            title="采购毛利差额 = 收入差 − 采购金额差额 − 采购运费差额。正数=送货少于采购，实际毛利低于按计划量的估算"
+                          >
+                            <LedgerGap value={group.purchaseMarginGap} />
+                            {(group.purchaseAmountGap != null || group.purchaseFreightGap != null) && (
+                              <button
+                                type="button"
+                                className="ledger-interest-detail-trigger"
+                                title="查看差额计算详情"
+                                onClick={() => setGapDetail(group)}
+                              >ⓘ 明细</button>
+                            )}
+                          </td>
+                        </>
                       )}
                       {firstMaterial && (
                         <>
@@ -1168,20 +1532,6 @@ export function ReconciliationLedgerPage({
                           <td rowSpan={transportSpan} className="transport-finance-cell"><LedgerMoney value={row.invoice} /></td>
                           <td rowSpan={transportSpan} className="transport-finance-cell"><LedgerRate value={row.taxRate} /></td>
                         </>
-                      )}
-                      {first && (
-                        <td
-                          rowSpan={renderRowCount}
-                          className="merged-finance-cell"
-                          title="采购毛利差额：按采购量估算的货款 − 按送货量的实际货款。正数=送货少于采购，实际毛利低于账面估算；还没有送货单时显示 -"
-                        >
-                          {group.purchaseMarginGap != null
-                            ? <LedgerMoney
-                                value={group.purchaseMarginGap}
-                                tone={group.purchaseMarginGap < 0 ? 'amount-pending' : ''}
-                              />
-                            : '-'}
-                        </td>
                       )}
                       {first && (
                         <>
@@ -1404,6 +1754,9 @@ export function ReconciliationLedgerPage({
           </div>
         </div>
       )}
+      {gapDetail && (
+        <GapDetailPopover group={gapDetail} onClose={() => setGapDetail(null)} />
+      )}
       {requestedDetail && (
         <div className="ledger-detail-overlay" onClick={() => setRequestedDetail(null)}>
           <div className="ledger-detail-popover wide" onClick={(event) => event.stopPropagation()}>
@@ -1502,7 +1855,11 @@ export function ReconciliationLedgerPage({
                               ? <span className="freight-entry">{row.materialName}</span>
                               : <><strong>{row.materialName}</strong>{row.spec ? <small> {row.spec}</small> : null}</>}
                           </td>
-                          <td>{isFreightRow ? '-' : ([row.quoteSpecName, row.quoteSource].filter(Boolean).join(' · ') || <span className="ledger-date-value">未匹配</span>)}</td>
+                          <td>{isFreightRow ? '-' : ([
+                            row.quoteSpecName,
+                            // 人工网价没有行情来源，标记出来，避免和行情价混淆（2026-11-12）
+                            row.quoteSource === 'manual_quote' ? '人工网价' : row.quoteSource
+                          ].filter(Boolean).join(' · ') || <span className="ledger-date-value">未匹配</span>)}</td>
                           <td>{isFreightRow ? '-' : <LedgerDate value={row.quoteDate ?? undefined} />}</td>
                           <td>{isFreightRow || row.quotePrice == null ? '-' : money(row.quotePrice)}</td>
                           <td
@@ -1631,6 +1988,7 @@ export function ReconciliationLedgerPage({
                                 ? <span>
                                     {[row.quoteProductName, row.quoteSpecName].filter(Boolean).join(' · ')}
                                     {row.origin ? `（${row.origin}）` : ''}
+                                    {row.manualQuotePrice != null && <small> · 人工网价</small>}
                                   </span>
                                 : <span className="ledger-date-value">未绑定</span>}
                             </td>

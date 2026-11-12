@@ -37,6 +37,10 @@ class LedgerExportServiceTest {
     DocumentService documentService = mock(DocumentService.class);
     DocumentItemMapper documentItemMapper = mock(DocumentItemMapper.class);
     LedgerService ledgerService = mock(LedgerService.class);
+    PurchaseCostBasisService costBasisService = mock(PurchaseCostBasisService.class);
+    when(costBasisService.basis(any())).thenReturn(
+        new PurchaseCostBasisService.Basis(false, BigDecimal.ZERO, BigDecimal.ZERO,
+            BigDecimal.ZERO, BigDecimal.ZERO, 0, false, List.of()));
 
     ProjectDto project = new ProjectDto("p1", "测试项目", "客户A", "进行中", 0,
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
@@ -79,7 +83,8 @@ class LedgerExportServiceTest {
     when(ledgerService.getLedgerByProject("u1", "p1")).thenReturn(List.of(record));
 
     LedgerExportService service = new LedgerExportService(
-        businessQueryService, documentService, documentItemMapper, ledgerService);
+        businessQueryService, documentService, documentItemMapper, ledgerService,
+        costBasisService);
 
     byte[] content = service.export("u1", "p1", "b1");
     assertTrue(content.length > 0, "导出内容不能为空");

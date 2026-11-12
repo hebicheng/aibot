@@ -44,6 +44,7 @@ class LedgerServiceTest {
   @Mock private BatchHintService batchHintService;
   @Mock private com.aibot.purchase.service.market.PurchaseSalePriceService salePriceService;
   @Mock private FreightService freightService;
+  @Mock private PurchaseCostBasisService costBasisService;
 
   private LedgerService service;
 
@@ -59,11 +60,16 @@ class LedgerServiceTest {
         new ObjectMapper(),
         batchHintService,
         salePriceService,
-        freightService
+        freightService,
+        costBasisService
     );
     // 运费行由 FreightService 维护：单测里默认没有运费
     lenient().when(freightService.sum(anyString(), anyString())).thenReturn(BigDecimal.ZERO);
     lenient().when(freightService.list(anyString(), any())).thenReturn(List.of());
+    // 采购成本基准默认空（没有采购单 / 没有送货单时实际值等于计划值）
+    lenient().when(costBasisService.basis(anyString())).thenReturn(
+        new PurchaseCostBasisService.Basis(false, BigDecimal.ZERO, BigDecimal.ZERO,
+            BigDecimal.ZERO, BigDecimal.ZERO, 0, false, List.of()));
   }
 
   @Test

@@ -109,17 +109,29 @@ public class DeliveryNetPriceService {
     }
 
     static PricingPolicy of(Document doc, BigDecimal globalUplift) {
-      if (doc == null) {
-        return new PricingPolicy("uplift", globalUplift, null);
+      return of(doc, null, globalUplift);
+    }
+
+    /**
+     * 送货单定价策略，三级：<b>单据自带口径 &gt; 批次默认口径 &gt; 全局默认上浮</b>（2026-11-12 修复）。
+     *
+     * <p>原来只有「单据口径 → 全局默认」两级，漏了批次口径这一层：用户在批次里说
+     * 「销售价网价+70」，只要单据上带着自己的口径（哪怕是识别时塞进来的默认档 margin 2.5%），
+     * 批次口径就完全不参与，用户会以为设置没生效。
+     */
+    public static PricingPolicy of(Document doc, java.util.Map<String, Object> batchHints,
+                                   BigDecimal globalUplift) {
+      if (doc != null) {
+        if ("margin".equals(doc.getPricingMode())) {
+          return new PricingPolicy("margin", null, doc.getMarginRate() != null
+              ? doc.getMarginRate() : new BigDecimal("2.5"));
+        }
+        if ("uplift".equals(doc.getPricingMode()) && doc.getUpliftAmount() != null) {
+          return new PricingPolicy("uplift", doc.getUpliftAmount(), null);
+        }
       }
-      if ("margin".equals(doc.getPricingMode())) {
-        return new PricingPolicy("margin", null, doc.getMarginRate() != null
-            ? doc.getMarginRate() : new BigDecimal("2.5"));
-      }
-      if ("uplift".equals(doc.getPricingMode()) && doc.getUpliftAmount() != null) {
-        return new PricingPolicy("uplift", doc.getUpliftAmount(), null);
-      }
-      return new PricingPolicy("uplift", globalUplift, null);
+      PricingPolicy fromBatch = fromBatchHints(batchHints);
+      return fromBatch != null ? fromBatch : new PricingPolicy("uplift", globalUplift, null);
     }
 
     /**
@@ -203,6 +215,15 @@ public class DeliveryNetPriceService {
     this.marketCities = marketCities;
   }
 
+  /** 单据定价策略：单据口径 > 批次默认口径 > 全局默认上浮（批次口径这一层见 {@link PricingPolicy#of}）。 */
+  private PricingPolicy policyOf(Document doc) {
+    java.util.Map<String, Object> hints = null;
+    if (doc != null && StringUtils.hasText(doc.getBatchId())) {
+      hints = batchHintService.deliveryNoteHints(batchMapper.selectById(doc.getBatchId()));
+    }
+    return PricingPolicy.of(doc, hints, salesUplift);
+  }
+
   /** 锁定结果摘要：matched=按口径定价行数 / fallback=回退单据金额行数 / pending=待 AI 兜底行数 /
    *  costPending=毛利率口径待采购价行数（不触发 AI 兜底，采购单到位后自动补算）。 */
   public record LockResult(int matched, int fallback, int pending, int costPending) {
@@ -247,7 +268,7 @@ public class DeliveryNetPriceService {
     }
     QuoteDay day = resolveQuoteDay(doc.getDocDate());
     LocalDate quoteTarget = doc.getDocDate() != null ? doc.getDocDate() : LocalDate.now();
-    PricingPolicy policy = PricingPolicy.of(doc, salesUplift);
+    PricingPolicy policy = policyOf(doc);
     // 毛利率口径以采购价为成本：一次载入本批次采购明细并按行匹配吨价
     // （行情只在 upsell 口径参与定价；margin 口径下网价仅作展示对比）
     boolean costMode = "margin".equals(policy.mode());
@@ -281,8 +302,9 @@ public class DeliveryNetPriceService {
 
       // 人工锁定（行情中心绑定）：按绑定规格精确取价，不被自动匹配覆盖
       if ("manual".equals(mapping.getStatus())) {
+        BigDecimal manualNet = manualQuotePriceOf(item, materials);
         LockedOutcome manual = resolveManualLocked(
-            mapping, item, pq, quoteTarget, day, quotesByProduct, policy, cost);
+            mapping, item, pq, quoteTarget, day, quotesByProduct, policy, cost, manualNet);
         if ("quote".equals(manual.basis()) || "cost".equals(manual.basis())) {
           mapping.setQuotePrice(manual.quotePrice());
           mapping.setUplift(manual.quotePrice() != null && manual.salesUnitPrice() != null
@@ -293,7 +315,8 @@ public class DeliveryNetPriceService {
           mapping.setQuoteDate(manual.quote() != null && manual.quote().getQuoteDate() != null
               ? manual.quote().getQuoteDate() : (day != null ? day.date() : null));
           mapping.setQuoteId(manual.quote() != null ? manual.quote().getId() : null);
-          mapping.setQuoteSource(manual.quote() != null ? manual.quote().getSource() : null);
+          mapping.setQuoteSource(manual.quote() != null ? manual.quote().getSource()
+              : (manualNet != null ? "manual_quote" : null));
           if (pq != null) {
             mapping.setPricingQuantity(pq.quantity());
             mapping.setPricingUnit(pq.unit());
@@ -409,7 +432,8 @@ public class DeliveryNetPriceService {
           basis = "unmatched";
           status = "unmatched";
         }
-      } else if (gm != null && gm.quote() != null && pq != null) {
+      } else if (gm != null && gm.avgPrice() != null && pq != null) {
+        // 用 avgPrice 而不是 quote 判空：人工网价没有行情行（quote=null），但价是有的
         quotePrice = gm.avgPrice();
         salesUnitPrice = policy.salesUnitPrice(quotePrice);
         method = gm.method();
@@ -436,12 +460,15 @@ public class DeliveryNetPriceService {
         status = "ai_pending";
       }
 
-      mapping.setProductCode(gm != null && gm.quote() != null ? gm.quote().getProductCode() : null);
-      mapping.setSpecName(gm != null && gm.quote() != null ? gm.quote().getSpecName() : null);
+      // 产品/规格从 GroupMatch 取（人工网价没有行情行，quote 为 null，靠它留痕）
+      mapping.setProductCode(gm == null ? null : gm.productCode());
+      mapping.setSpecName(gm == null ? null : gm.specName());
       mapping.setQuoteId(gm != null && gm.quote() != null ? gm.quote().getId() : null);
       mapping.setQuoteDate(gm != null && gm.quote() != null && gm.quote().getQuoteDate() != null
           ? gm.quote().getQuoteDate() : (day != null ? day.date() : null));
-      mapping.setQuoteSource(gm != null && gm.quote() != null ? gm.quote().getSource() : null);
+      // 人工网价没有行情来源，用 method 当来源标记（manual_quote），台账/明细据此显示"人工网价"
+      mapping.setQuoteSource(gm == null ? null
+          : gm.quote() != null ? gm.quote().getSource() : gm.method());
       mapping.setOriginLabel(gm != null ? gm.originLabel() : null);
       mapping.setQuotePrice(quotePrice);
       mapping.setUplift(quotePrice != null && salesUnitPrice != null
@@ -617,7 +644,7 @@ public class DeliveryNetPriceService {
 
     QuoteDay day = resolveQuoteDay(doc.getDocDate());
     LocalDate quoteTarget = doc.getDocDate() != null ? doc.getDocDate() : LocalDate.now();
-    PricingPolicy policy = PricingPolicy.of(doc, salesUplift);
+    PricingPolicy policy = policyOf(doc);
     if ("margin".equals(policy.mode())) {
       // 毛利率口径的销售价按采购价倒推，AI 匹配行情帮不上忙：
       // 直接返回，交给下次重锁（采购单到位 / 重跑批次）按采购价定价。
@@ -995,13 +1022,28 @@ public class DeliveryNetPriceService {
         && StringUtils.hasText(material.getQuoteSpecName());
   }
 
+  /** 该明细行对应材料的人工网价（元/吨）；没有材料或没填返回 null。 */
+  private static BigDecimal manualQuotePriceOf(DocumentItem item, Map<String, BatchMaterial> materials) {
+    if (item.getMaterialId() == null) {
+      return null;
+    }
+    BatchMaterial material = materials.get(item.getMaterialId());
+    if (material == null || material.getManualQuotePrice() == null
+        || material.getManualQuotePrice().signum() <= 0) {
+      return null;
+    }
+    return material.getManualQuotePrice();
+  }
+
   private static Binding bindingOf(DocumentItem item, Map<String, BatchMaterial> materials) {
     if (item.getMaterialId() == null) {
       return null;
     }
     BatchMaterial material = materials.get(item.getMaterialId());
     return isBound(material)
-        ? new Binding(material.getQuoteProductCode(), material.getQuoteSpecName())
+        ? new Binding(material.getQuoteProductCode(), material.getQuoteSpecName(),
+            material.getManualQuotePrice() != null && material.getManualQuotePrice().signum() > 0
+                ? material.getManualQuotePrice() : null)
         : null;
   }
 
@@ -1025,7 +1067,12 @@ public class DeliveryNetPriceService {
   // ---------------------------------------------------------------------------
 
   /** 分组匹配结果：命中行情行 + 同规格均价 + 取价口径标记。 */
-  private record GroupMatch(MarketQuote quote, BigDecimal avgPrice, String originLabel, String method) {
+  /**
+   * 分组匹配结果：命中行情行 + 该组实际采用的价 + 产地标签 + 匹配方式。
+   * productCode/specName 单独带出：人工网价没有行情行（quote=null），台账仍要能显示"匹配的哪个规格"。
+   */
+  private record GroupMatch(MarketQuote quote, BigDecimal avgPrice, String originLabel, String method,
+                            String productCode, String specName) {
   }
 
   /** 人工锁定取价结果。 */
@@ -1042,8 +1089,24 @@ public class DeliveryNetPriceService {
       QuoteDay day,
       Map<String, List<MarketQuote>> quotesByProduct,
       PricingPolicy policy,
-      PurchaseCostResolver.Cost cost
+      PurchaseCostResolver.Cost cost,
+      BigDecimal manualNetPrice
   ) {
+    // 人工网价优先（2026-11-12）：不再查行情库，价就用材料行上那个值
+    if (manualNetPrice != null && pq != null && "吨".equals(pq.unit())) {
+      if ("margin".equals(policy.mode())) {
+        // 毛利率口径：网价只留痕，销售价仍按采购价倒推
+        if (cost == null || !cost.priced()) {
+          return new LockedOutcome(null, "cost_pending", manualNetPrice, null, null);
+        }
+        BigDecimal salesUnitPrice = policy.salesUnitPriceFromCost(cost.unitPrice(), null);
+        return new LockedOutcome(null, "cost", manualNetPrice, salesUnitPrice,
+            salesUnitPrice.multiply(pq.quantity()).setScale(2, RoundingMode.HALF_UP));
+      }
+      BigDecimal salesUnitPrice = policy.salesUnitPrice(manualNetPrice);
+      return new LockedOutcome(null, "quote", manualNetPrice, salesUnitPrice,
+          salesUnitPrice.multiply(pq.quantity()).setScale(2, RoundingMode.HALF_UP));
+    }
     MarketQuote bound = null;
     if (day != null && pq != null && "吨".equals(pq.unit())
         && StringUtils.hasText(mapping.getProductCode()) && StringUtils.hasText(mapping.getSpecName())) {
@@ -1103,6 +1166,12 @@ public class DeliveryNetPriceService {
     if (pq == null || !"吨".equals(pq.unit())) {
       return null;
     }
+    // 人工网价最高优先（2026-11-12）：材料行上填了价就直接用它，不查行情库。
+    // 没有行情行可挂，所以 quote=null，靠 GroupMatch 的 productCode/specName 留痕。
+    if (binding != null && binding.manualQuotePrice() != null) {
+      return new GroupMatch(null, binding.manualQuotePrice(), item.getOrigin(), "manual_quote",
+          binding.productCode(), binding.specName());
+    }
     MarketQuote quote;
     List<MarketQuote> rows;
     String method;
@@ -1114,7 +1183,8 @@ public class DeliveryNetPriceService {
           .filter(r -> r.getPrice() != null && r.getPrice().signum() > 0)
           .findFirst().orElse(null);
       if (quote == null) {
-        return new GroupMatch(null, null, null, "unmatched");
+        return new GroupMatch(null, null, null, "unmatched",
+            binding.productCode(), binding.specName());
       }
       method = "material";
     } else {
@@ -1127,7 +1197,8 @@ public class DeliveryNetPriceService {
           quotesForProduct(parsed.productCode(), target, quotesByProduct));
       quote = matchService.matchFromRows(rows, parsed.spec(), parsed.grade());
       if (quote == null) {
-        return new GroupMatch(null, null, null, "unmatched");
+        return new GroupMatch(null, null, null, "unmatched",
+            parsed.productCode(), null);
       }
       method = "exact";
     }
@@ -1138,7 +1209,8 @@ public class DeliveryNetPriceService {
         .filter(r -> r.getPrice() != null && r.getPrice().signum() > 0)
         .toList();
     if (sameSpec.isEmpty()) {
-      return new GroupMatch(quote, quote.getPrice(), null, method);
+      return new GroupMatch(quote, quote.getPrice(), null, method,
+          quote.getProductCode(), quote.getSpecName());
     }
     String itemOrigin = item.getOrigin() == null ? "" : item.getOrigin().trim();
     if (StringUtils.hasText(itemOrigin)) {
@@ -1146,32 +1218,36 @@ public class DeliveryNetPriceService {
           .filter(r -> originMatches(itemOrigin, r.getOrigin()))
           .toList();
       if (!byOrigin.isEmpty()) {
-        // 产地命中：单行直接取价，多行（同规格同产地）取均价，产地标记为命中产地
-        MarketQuote originRep = byOrigin.get(0);
-        if (byOrigin.size() == 1) {
-          return new GroupMatch(originRep, originRep.getPrice(), originRep.getOrigin(), method);
-        }
-        BigDecimal avg = byOrigin.stream()
-            .map(MarketQuote::getPrice)
-            .reduce(BigDecimal.ZERO, BigDecimal::add)
-            .divide(new BigDecimal(byOrigin.size()), 2, RoundingMode.HALF_UP);
-        return new GroupMatch(originRep, avg, originRep.getOrigin(), method);
+        // 产地命中：来源优先（mysteel 权威价 > gtgqw 爬取价），同来源多行才平均。
+        // 权威价与爬取价并存是设计（可回溯），平均会把人工改的价稀释成不存在的价
+        BigDecimal price = MaterialMarketMatchService.priceOf(byOrigin);
+        MarketQuote originRep = byOrigin.stream()
+            .filter(r -> r.getPrice() != null && r.getPrice().equals(price))
+            .findFirst().orElse(byOrigin.get(0));
+        return new GroupMatch(originRep, price, originRep.getOrigin(), method,
+            originRep.getProductCode(), originRep.getSpecName());
       }
       // 产地未命中 → 继续走下方全产地均价回退
     }
     if (sameSpec.size() == 1) {
       MarketQuote only = sameSpec.get(0);
-      return new GroupMatch(only, only.getPrice(), only.getOrigin(), method);
+      return new GroupMatch(only, only.getPrice(), only.getOrigin(), method,
+          only.getProductCode(), only.getSpecName());
     }
     BigDecimal sum = sameSpec.stream()
         .map(MarketQuote::getPrice)
         .reduce(BigDecimal.ZERO, BigDecimal::add);
     BigDecimal avg = sum.divide(new BigDecimal(sameSpec.size()), 2, RoundingMode.HALF_UP);
-    return new GroupMatch(quote, avg, "均价(" + sameSpec.size() + "条)", method);
+    return new GroupMatch(quote, avg, "均价(" + sameSpec.size() + "条)", method,
+        quote.getProductCode(), quote.getSpecName());
   }
 
   /** 材料级网价绑定（产品码 + 规格名），取价时采购/送货两侧共用。 */
-  private record Binding(String productCode, String specName) {
+  /**
+   * 材料绑定：产品 + 规格 + 人工网价（可空）。人工网价非空时直接定价，不再查行情库
+   * （只影响本材料/本批次，2026-11-12）。
+   */
+  private record Binding(String productCode, String specName, BigDecimal manualQuotePrice) {
   }
 
   /** 产地匹配：互相包含即视为命中（单据产地常为简称，如「沙钢」命中行情产地「沙钢/沙永」）。 */

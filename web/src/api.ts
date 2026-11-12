@@ -386,6 +386,9 @@ export type ApiLedgerRow = {
   // 采购毛利额/毛利率（批次级，后端现算瞬时值；undefined=无口径或无命中行；成本含运费）
   purchaseMarginAmount?: number;
   purchaseMarginRate?: number;
+  // 毛利的计划值（按采购单计划量与计划运费算，2026-11-12）：页面括号里展示的就是它
+  purchaseMarginPlanAmount?: number;
+  purchaseMarginPlanRate?: number;
   // 采购毛利算不出的原因：no_policy=缺定价口径 no_supply=无已确认采购单 no_priced_row=采购明细缺吨数或金额
   purchaseMarginNote?: string;
   // 采购运费成本（批次级）：运输单合计 > 送货单采购运费 > 批次运费口径推算
@@ -394,8 +397,34 @@ export type ApiLedgerRow = {
   purchaseSalesFreight?: number;
   // 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额
   deliveryCostPendingCount?: number;
-  // 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单
+  // 采购毛利差额（批次级，2026-11-12 改语义）：按计划量的毛利 − 按实际送达量的毛利
+  // = 收入差 − 采购金额差额 − 采购运费差额；undefined=无送货单或缺定价口径
   purchaseMarginGap?: number;
+  // 收入差（批次级）：按采购量估算货款 − 按送货量实际锁定货款（差额详情里的一行）
+  purchaseRevenueGap?: number;
+  // 采购计划金额（批次级）：采购单口径金额，页面括号里展示的就是它
+  purchasePlanAmount?: number;
+  // 采购金额差额（批次级）= 采购计划金额 − 实际送达成本
+  purchaseAmountGap?: number;
+  // 计划运费（批次级）：元/吨口径按采购吨数还原，其余金额不随量变
+  purchaseFreightPlan?: number;
+  // 采购运费差额（批次级）= 计划运费 − 实际运费
+  purchaseFreightGap?: number;
+  // 批次是否有已确认送货单（false 时实际值等于计划值，差额列显示「-」）
+  purchaseHasDelivery?: boolean;
+  // 送货明细里算不出吨数、未计入实际成本的行数
+  purchaseUnpricedDeliveryRows?: number;
+  // 采购成本基准逐材料大类明细：材料行「实际（计划）」括号与差额详情弹框都读它
+  materialCostBasis?: Array<{
+    category: string;
+    planTons: number;
+    planAmount: number;
+    deliveredTons: number;
+    actualAmount: number;
+    unitPrice?: number;
+    fallbackPriced?: boolean;
+    unpriced?: boolean;
+  }>;
   // 运费明细行（批次级）：口径/运输单/单据写明并列累加，运输费用行的构成明细直接用它
   freightItems?: Array<{
     id: string;
@@ -626,12 +655,14 @@ export const api = {
   // 材料清单：批次内每种材料一行（身份 + 网价绑定 + 采购/送货两侧聚合 + 锁定网价口径）
   materials: (batchId: string) =>
     request<MaterialRow[]>(`/api/market/materials?batchId=${encodeURIComponent(batchId)}`),
-  // 材料级改价：把该材料取价日的绑定规格价钉成权威价（发起批次同步、其余后台）
-  materialQuoteUpdate: (materialId: string, price: number) =>
-    request<MarketImportOutcome>(`/api/market/materials/${encodeURIComponent(materialId)}/quote-price`, {
-      method: 'PUT',
-      body: JSON.stringify({ price })
-    }),
+  // 材料级改价（2026-11-12）：写该材料自己的人工网价，只重锁本批次，不改行情库；
+  // price 传 null = 清空人工网价、恢复按行情库取价
+  materialQuoteUpdate: (materialId: string, price: number | null) =>
+    request<{ manualQuotePrice: number | null; relocked: number }>(
+      `/api/market/materials/${encodeURIComponent(materialId)}/quote-price`, {
+        method: 'PUT',
+        body: JSON.stringify({ price })
+      }),
   // 人工绑定/解绑材料级网价（manual 永不被自动流程覆盖），绑定后后端立即重锁批次
   bindMaterial: (payload: MaterialBindRequest) =>
     request<void>('/api/market/materials/bind', {
@@ -948,6 +979,8 @@ export type MaterialRow = {
   supplyItemId: string | null;
   // 材料级人工销售价（元/吨）：非空时锁价优先于口径推算
   manualSalesPrice: number | null;
+  // 材料级人工网价（元/吨，2026-11-12）：非空时锁定网价直接用它，优先于行情库；只影响本材料/本批次
+  manualQuotePrice?: number | null;
   purchaseTons: number | null;
   purchasePrice: number | null;
   purchaseRows: number;

@@ -1024,46 +1024,35 @@ public class DocumentService {
       }
     }
 
+    // 默认档毛利率必须有文本依据（2026-11-12）：模型在没有「毛利率」字样的单据上也会填
+    // margin + 2.5%（prompt 的默认档），一旦落到单据字段就会压住批次口径——用户设了
+    // 「网价+70」却仍按毛利率算。无依据的默认档视为「没给口径」，往下走批次默认口径。
+    if ("margin".equals(mode) && margin != null
+        && margin.compareTo(DEFAULT_MARGIN_RATE) == 0
+        && !MARGIN_DEFAULT_HINT.matcher(hint).find()
+        && !MARGIN_RATE_HINT.matcher(hint).find()) {
+      log.info("单据定价：AI 给了默认毛利率 {}% 但说明里没有毛利字样，按未指定处理", margin);
+      mode = null;
+      margin = null;
+    }
+
     if ("margin".equals(mode)) {
       doc.setPricingMode("margin");
       doc.setMarginRate(margin != null ? margin : DEFAULT_MARGIN_RATE);
       doc.setUpliftAmount(null);
-    } else if (uplift != null || "uplift".equals(mode)) {
-      // 给了上浮方式但金额缺失时（LLM 偶发 pricingMode=uplift、upliftAmount=null），
-      // 批次口径优先，其次留空走全局默认（DeliveryNetPriceService）
-      BigDecimal effectiveUplift = uplift != null ? uplift
-          : batchHintUplift(doc.getBatchId());
+    } else if (uplift != null) {
       doc.setPricingMode("uplift");
-      doc.setUpliftAmount(effectiveUplift);
+      doc.setUpliftAmount(uplift);
       doc.setMarginRate(null);
     } else {
-      // 第三级兜底：批次默认口径（批次提示词）——payload 与附带说明都没提定价时套用
-      Map<String, Object> hints = batchHintService.deliveryNoteHints(
-          batchMapper.selectById(doc.getBatchId()));
-      BigDecimal hintUplift = BatchHintService.decimal(hints.get(BatchHintService.KEY_UPLIFT_AMOUNT));
-      BigDecimal hintMargin = BatchHintService.decimal(hints.get(BatchHintService.KEY_MARGIN_RATE));
-      if ("uplift".equals(hints.get(BatchHintService.KEY_PRICING_MODE)) && hintUplift != null) {
-        doc.setPricingMode("uplift");
-        doc.setUpliftAmount(hintUplift);
-        doc.setMarginRate(null);
-      } else if ("margin".equals(hints.get(BatchHintService.KEY_PRICING_MODE)) && hintMargin != null) {
-        doc.setPricingMode("margin");
-        doc.setMarginRate(hintMargin);
-        doc.setUpliftAmount(null);
-      } else {
-        doc.setPricingMode(null);
-        doc.setUpliftAmount(null);
-        doc.setMarginRate(null);
-      }
+      // 单据没有自带口径 → **不写单据字段**（2026-11-12 改）。
+      // 项目/批次口径是「共享参数」，读取时实时解析（单据 > 批次 > 项目 > 全局默认）。
+      // 曾经这里把当时生效的批次/项目口径抄一份存进单据字段，等于给单据打了个快照：
+      // 快照永远压着后来改的口径，用户在批次里说「网价+70」也毫无效果——这是本轮 bug 的根因。
+      doc.setPricingMode(null);
+      doc.setUpliftAmount(null);
+      doc.setMarginRate(null);
     }
-  }
-
-  /** 批次口径里的上浮金额（仅当批次定价方式为 uplift 时）；无则 null。 */
-  private BigDecimal batchHintUplift(String batchId) {
-    Map<String, Object> hints = batchHintService.deliveryNoteHints(batchMapper.selectById(batchId));
-    return "uplift".equals(hints.get(BatchHintService.KEY_PRICING_MODE))
-        ? BatchHintService.decimal(hints.get(BatchHintService.KEY_UPLIFT_AMOUNT))
-        : null;
   }
 
   /** 明细计价重量合计（吨）：totalWeight 换算优先，无重量时用计价数量（重量单位才计）。任一行都没有重量返回 null。 */
@@ -1106,21 +1095,28 @@ public class DocumentService {
     return weight;
   }
 
-  /** 确认卡片上的销售定价说明（送货单）。pricingMode 为空时也给出默认口径。 */
+  /**
+   * 确认卡片上的销售定价说明（送货单）：按**生效口径**渲染——单据自带口径 &gt; 批次口径 &gt; 项目口径
+   * &gt; 全局默认上浮（2026-11-12 改）。单据字段只存"这张单自己说的口径"，批次/项目口径在读取时解析，
+   * 所以这里必须一起解析，否则卡片会显示全局默认，与实际锁价口径不一致。
+   */
   public String pricingNote(Document document) {
-    if ("margin".equals(document.getPricingMode())) {
-      BigDecimal rate = document.getMarginRate() != null
-          ? document.getMarginRate() : DEFAULT_MARGIN_RATE;
-      boolean isDefault = document.getMarginRate() == null;
+    java.util.Map<String, Object> hints = StringUtils.hasText(document.getBatchId())
+        ? batchHintService.deliveryNoteHints(batchMapper.selectById(document.getBatchId()))
+        : null;
+    com.aibot.purchase.service.market.DeliveryNetPriceService.PricingPolicy policy =
+        com.aibot.purchase.service.market.DeliveryNetPriceService.PricingPolicy.of(
+            document, hints, defaultSalesUplift);
+    boolean fromDocument = StringUtils.hasText(document.getPricingMode());
+    if ("margin".equals(policy.mode())) {
+      BigDecimal rate = policy.marginRate() != null ? policy.marginRate() : DEFAULT_MARGIN_RATE;
       String net = plainText(new BigDecimal("100").subtract(rate));
       // 毛利率口径的成本是采购价（同批次采购单的吨价），不再用网价当基数
-      return "销售价=采购价÷" + net + "%（" + (isDefault ? "默认毛利率" : "毛利率")
-          + plainText(rate) + "%）";
+      return "销售价=采购价÷" + net + "%（毛利率" + plainText(rate) + "%"
+          + (fromDocument ? "" : "，默认口径") + "）";
     }
-    if ("uplift".equals(document.getPricingMode()) && document.getUpliftAmount() != null) {
-      return "销售价=网价+" + plainText(document.getUpliftAmount()) + "元/吨";
-    }
-    return "销售价=网价+" + plainText(defaultSalesUplift) + "元/吨（默认）";
+    BigDecimal uplift = policy.upliftAmount() != null ? policy.upliftAmount() : defaultSalesUplift;
+    return "销售价=网价+" + plainText(uplift) + "元/吨" + (fromDocument ? "" : "（默认口径）");
   }
 
   private static String plainText(BigDecimal value) {

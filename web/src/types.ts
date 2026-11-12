@@ -125,6 +125,9 @@ export interface LedgerRow {
   /** 采购毛利额/毛利率（批次级，后端现算瞬时值；undefined=无口径或无有效行；成本含运费） */
   purchaseMarginAmount?: number;
   purchaseMarginRate?: number;
+  /** 毛利的计划值（按采购单计划量与计划运费算）：括号里展示的就是它 */
+  purchaseMarginPlanAmount?: number;
+  purchaseMarginPlanRate?: number;
   /** 毛利算不出的原因：no_policy=缺定价口径 no_supply=无已确认采购单 no_priced_row=明细缺吨数或金额 */
   purchaseMarginNote?: string;
   /** 采购运费成本（批次级）：运输单运费合计 > 送货单采购运费合计 > 批次运费口径推算 */
@@ -133,8 +136,33 @@ export interface LedgerRow {
   purchaseSalesFreight?: number;
   /** 待采购价的送货明细行数（批次级）：这些行金额为 0，未计入销售总金额 */
   deliveryCostPendingCount?: number;
-  /** 采购毛利差额（批次级）：按采购量估算货款 − 按送货量实际货款；undefined=还没有送货单 */
+  /** 采购毛利差额（批次级，2026-11-12 改语义）：按计划量的毛利 − 按实际送达量的毛利；undefined=无送货单 */
   purchaseMarginGap?: number;
+  /** 收入差（批次级）：按采购量估算货款 − 按送货量实际锁定货款（差额详情里的一行） */
+  purchaseRevenueGap?: number;
+  /** 采购计划金额（批次级）：采购单口径金额，页面括号里展示的就是它 */
+  purchasePlanAmount?: number;
+  /** 采购金额差额（批次级）= 采购计划金额 − 实际送达成本 */
+  purchaseAmountGap?: number;
+  /** 计划运费（批次级）：元/吨口径按采购吨数还原 */
+  purchaseFreightPlan?: number;
+  /** 采购运费差额（批次级）= 计划运费 − 实际运费 */
+  purchaseFreightGap?: number;
+  /** 批次是否有已确认送货单（false 时实际值等于计划值，差额列显示「-」） */
+  purchaseHasDelivery?: boolean;
+  /** 送货明细里算不出吨数、未计入实际成本的行数 */
+  purchaseUnpricedDeliveryRows?: number;
+  /** 采购成本基准逐材料大类明细 */
+  materialCostBasis?: Array<{
+    category: string;
+    planTons: number;
+    planAmount: number;
+    deliveredTons: number;
+    actualAmount: number;
+    unitPrice?: number;
+    fallbackPriced?: boolean;
+    unpriced?: boolean;
+  }>;
   /** 运费明细行（批次级）：口径 / 运输单 / 单据写明并列累加，运输费用行的构成明细直接读它 */
   freightItems?: Array<{
     id: string;

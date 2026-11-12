@@ -51,6 +51,13 @@ public class BatchMaterial {
   private String pricingMode;
   private BigDecimal upliftAmount;
   private BigDecimal marginRate;
+  /**
+   * 人工网价（元/吨，2026-11-12 建）：非空时优先于行情库取价，只影响本材料/本批次。
+   *
+   * <p>与 {@link #manualSalesPrice} 的分工：人工网价换的是「取价基准」（销售价仍按口径算），
+   * 人工销售价直接定死「销售单价」。改价入口在批次材料，改完只重锁本批次，<b>不写行情库</b>。
+   */
+  private BigDecimal manualQuotePrice;
   private BigDecimal manualSalesPrice;
   /** 对应的采购明细行（同材料同日只有一个价）。 */
   private String supplyItemId;

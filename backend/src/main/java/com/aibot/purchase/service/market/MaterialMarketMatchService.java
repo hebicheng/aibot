@@ -224,6 +224,41 @@ public class MaterialMarketMatchService {
   }
 
   /**
+   * 同规格（且已按产地筛过）多行时的取价：<b>来源优先，同来源才平均</b>。
+   *
+   * <p>权威价（mysteel，人工导入/改价确认）与爬取价（gtgqw）同规格同产地并存是设计（可回溯），
+   * 但取价取算术平均会把人工确认的价稀释成一个谁都没报过的价：实测改价 3540、爬取 3310，
+   * 页面显示 (3310+3540)/2 = 3425，用户看到"改价没生效"。所以先取最高优先级来源的那条，
+   * 只有同来源内仍多行（真正的重复数据）才平均。
+   */
+  public static BigDecimal priceOf(List<MarketQuote> rows) {
+    List<MarketQuote> priced = rows.stream()
+        .filter(row -> row.getPrice() != null && row.getPrice().signum() > 0)
+        .toList();
+    if (priced.isEmpty()) {
+      return null;
+    }
+    int best = priced.stream().mapToInt(row -> sourceRank(row.getSource())).min().orElse(2);
+    List<MarketQuote> top = priced.stream()
+        .filter(row -> sourceRank(row.getSource()) == best)
+        .toList();
+    if (top.size() == 1) {
+      return top.get(0).getPrice();
+    }
+    return top.stream().map(MarketQuote::getPrice)
+        .reduce(BigDecimal.ZERO, BigDecimal::add)
+        .divide(new BigDecimal(top.size()), 2, java.math.RoundingMode.HALF_UP);
+  }
+
+  /** 来源优先级：mysteel（人工确认的权威价）&gt; gtgqw（爬取）&gt; 其他。 */
+  public static int sourceRank(String source) {
+    if ("mysteel".equalsIgnoreCase(source)) {
+      return 0;
+    }
+    return "gtgqw".equalsIgnoreCase(source) ? 1 : 2;
+  }
+
+  /**
    * 在候选行中按材质优先级选第一条：先严格材质相等（HRB400E→HRB400E），
    * 再宽松材质近似（HRB400E ↔ HRB400）。避免有精确材质时却匹配到近似材质。
    */

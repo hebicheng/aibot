@@ -37,6 +37,21 @@ public class GlobalExceptionHandler {
     return ResponseEntity.badRequest().body(ApiResponse.error(message));
   }
 
+  /**
+   * 未知路径（手误打错、或过期客户端调旧接口）：返回 404，日志降为 WARN 且不打堆栈。
+   *
+   * <p>2026-11-12：排障时手误请求了 {@code /api/ledger/columns}（真实路径是
+   * {@code /api/reports/ledger/columns}），Spring 抛 NoResourceFoundException 被下面的兜底
+   * 捕获成 ERROR + 完整堆栈，看着像服务炸了。路径不存在不是服务异常，不该按 500 处理。
+   */
+  @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+  public ResponseEntity<ApiResponse<Void>> handleNoResource(
+      HttpServletRequest request) {
+    log.warn("请求的路径不存在：{}", request.getRequestURI());
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(ApiResponse.error("接口不存在：" + request.getRequestURI()));
+  }
+
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex, HttpServletRequest request) {
     log.error("未处理异常 uri={}", request.getRequestURI(), ex);

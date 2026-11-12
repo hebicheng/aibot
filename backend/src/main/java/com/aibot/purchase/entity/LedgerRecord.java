@@ -73,6 +73,14 @@ public class LedgerRecord {
   @TableField(exist = false)
   private BigDecimal purchaseMarginRate;
   /**
+   * 采购毛利的计划值（元 / %，批次级，时点值，2026-11-12）：按采购单计划量与计划运费算出的毛利，
+   * 实际毛利 + 毛利差额。页面「采购毛利金额 / 采购毛利率」括号里展示的就是它。
+   */
+  @TableField(exist = false)
+  private BigDecimal purchaseMarginPlanAmount;
+  @TableField(exist = false)
+  private BigDecimal purchaseMarginPlanRate;
+  /**
    * 采购毛利算不出的原因（批次级，时点值）：no_policy=缺定价口径 / no_supply=无已确认采购单 /
    * no_priced_row=采购明细缺吨数或金额；能算出毛利时为 null。前端据此显示原因而不是空白。
    */
@@ -91,11 +99,39 @@ public class LedgerRecord {
   @TableField(exist = false)
   private Integer deliveryCostPendingCount;
   /**
-   * 采购毛利差额（元，批次级，时点值）：按采购量的估算货款 − 按送货量的实际货款。
-   * 采购与送货数量不一致时，正数表示送货少了、实际毛利低于账面估算；没有送货单时为空。
+   * 采购毛利差额（元，批次级，时点值，2026-11-12 改语义）：按计划量算的毛利 − 按实际送达量算的毛利
+   * = 收入差 − 采购金额差额 − 采购运费差额。正数表示少送导致实际毛利低于账面估算；无送货单/缺定价口径时为空。
+   * （改造前此字段是收入差，现拆到 {@link #purchaseRevenueGap} 只用于详情算式。）
    */
   @TableField(exist = false)
   private BigDecimal purchaseMarginGap;
+  /** 收入差（元，批次级，时点值）：按采购量估算的货款 − 按送货量实际锁定货款。 */
+  @TableField(exist = false)
+  private BigDecimal purchaseRevenueGap;
+  /** 采购计划金额（元，批次级，时点值）：采购单口径金额，括号里展示的就是它。 */
+  @TableField(exist = false)
+  private BigDecimal purchasePlanAmount;
+  /** 采购金额差额（元，批次级，时点值）= 采购计划金额 − 实际送达成本。 */
+  @TableField(exist = false)
+  private BigDecimal purchaseAmountGap;
+  /** 计划运费（元，批次级，时点值）：元/吨口径按采购吨数还原，其余金额不随量变。 */
+  @TableField(exist = false)
+  private BigDecimal purchaseFreightPlan;
+  /** 采购运费差额（元，批次级，时点值）= 计划运费 − 实际运费。 */
+  @TableField(exist = false)
+  private BigDecimal purchaseFreightGap;
+  /** 批次是否有已确认送货单（false 时实际值等于计划值，差额列显示「-」）。 */
+  @TableField(exist = false)
+  private Boolean purchaseHasDelivery;
+  /** 送货明细里算不出吨数、未计入实际成本的行数（差额详情里提示用）。 */
+  @TableField(exist = false)
+  private Integer purchaseUnpricedDeliveryRows;
+  /**
+   * 采购成本基准逐材料大类明细（时点值，2026-11-12 起）：计划吨数/金额、送达吨数、
+   * 采购吨价、实际成本。材料行「实际（计划）」括号与差额详情弹框都读它。
+   */
+  @TableField(exist = false)
+  private List<com.aibot.purchase.service.PurchaseCostBasisService.MaterialBasis> materialCostBasis;
   /**
    * 运费明细行（批次级，时点值，2026-11-11 起）：口径 / 运输单 / 单据写明并列存在，
    * 页面与导出的「运输费用」行构成明细直接读它，不再按「总额 − 单据运费」倒算。
@@ -194,6 +230,14 @@ public class LedgerRecord {
 
   public BigDecimal getPurchaseMarginRate() { return purchaseMarginRate; }
   public void setPurchaseMarginRate(BigDecimal purchaseMarginRate) { this.purchaseMarginRate = purchaseMarginRate; }
+  public BigDecimal getPurchaseMarginPlanAmount() { return purchaseMarginPlanAmount; }
+  public void setPurchaseMarginPlanAmount(BigDecimal purchaseMarginPlanAmount) {
+    this.purchaseMarginPlanAmount = purchaseMarginPlanAmount;
+  }
+  public BigDecimal getPurchaseMarginPlanRate() { return purchaseMarginPlanRate; }
+  public void setPurchaseMarginPlanRate(BigDecimal purchaseMarginPlanRate) {
+    this.purchaseMarginPlanRate = purchaseMarginPlanRate;
+  }
   public String getPurchaseMarginNote() { return purchaseMarginNote; }
   public void setPurchaseMarginNote(String purchaseMarginNote) { this.purchaseMarginNote = purchaseMarginNote; }
   public BigDecimal getPurchaseSalesFreight() { return purchaseSalesFreight; }
@@ -205,6 +249,41 @@ public class LedgerRecord {
   public BigDecimal getPurchaseMarginGap() { return purchaseMarginGap; }
   public void setPurchaseMarginGap(BigDecimal purchaseMarginGap) {
     this.purchaseMarginGap = purchaseMarginGap;
+  }
+  public BigDecimal getPurchaseRevenueGap() { return purchaseRevenueGap; }
+  public void setPurchaseRevenueGap(BigDecimal purchaseRevenueGap) {
+    this.purchaseRevenueGap = purchaseRevenueGap;
+  }
+  public BigDecimal getPurchasePlanAmount() { return purchasePlanAmount; }
+  public void setPurchasePlanAmount(BigDecimal purchasePlanAmount) {
+    this.purchasePlanAmount = purchasePlanAmount;
+  }
+  public BigDecimal getPurchaseAmountGap() { return purchaseAmountGap; }
+  public void setPurchaseAmountGap(BigDecimal purchaseAmountGap) {
+    this.purchaseAmountGap = purchaseAmountGap;
+  }
+  public BigDecimal getPurchaseFreightPlan() { return purchaseFreightPlan; }
+  public void setPurchaseFreightPlan(BigDecimal purchaseFreightPlan) {
+    this.purchaseFreightPlan = purchaseFreightPlan;
+  }
+  public BigDecimal getPurchaseFreightGap() { return purchaseFreightGap; }
+  public void setPurchaseFreightGap(BigDecimal purchaseFreightGap) {
+    this.purchaseFreightGap = purchaseFreightGap;
+  }
+  public Boolean getPurchaseHasDelivery() { return purchaseHasDelivery; }
+  public void setPurchaseHasDelivery(Boolean purchaseHasDelivery) {
+    this.purchaseHasDelivery = purchaseHasDelivery;
+  }
+  public Integer getPurchaseUnpricedDeliveryRows() { return purchaseUnpricedDeliveryRows; }
+  public void setPurchaseUnpricedDeliveryRows(Integer purchaseUnpricedDeliveryRows) {
+    this.purchaseUnpricedDeliveryRows = purchaseUnpricedDeliveryRows;
+  }
+  public List<com.aibot.purchase.service.PurchaseCostBasisService.MaterialBasis> getMaterialCostBasis() {
+    return materialCostBasis;
+  }
+  public void setMaterialCostBasis(
+      List<com.aibot.purchase.service.PurchaseCostBasisService.MaterialBasis> materialCostBasis) {
+    this.materialCostBasis = materialCostBasis;
   }
   public List<FreightItem> getFreightItems() { return freightItems; }
   public void setFreightItems(List<FreightItem> freightItems) {
