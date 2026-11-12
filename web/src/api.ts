@@ -809,10 +809,21 @@ export const api = {
     request<number>(`/api/market/match/run?batchId=${encodeURIComponent(batchId)}`, { method: 'POST' }),
   // 指定产品的行情规格候选（人工绑定用）。按「用户选中的产品」实时拉取，
   // 与 mapping.candidates（按材料推导产品码预计算）无关。
-  /** 规格候选：spec=规格名，sources=该规格有哪些来源渠道（mysteel 权威 / gtgqw 爬取） */
-  marketProductSpecs: (code: string) =>
-    request<Array<{ spec: string; sources?: string[]; price?: number }>>(
+  /**
+   * 规格候选：spec=规格名，sources=该规格在该日有哪些来源渠道（mysteel 权威 / gtgqw 爬取），
+   * latestDate=该规格最近有价日，onQuoteDay=是否在材料取价日当天有价（当天有价才真能取到价）。
+   * materialId 决定日期口径（该材料的取价日），不传按今天解析。
+   */
+  marketProductSpecs: (code: string, materialId?: string) =>
+    request<Array<{
+      spec: string;
+      sources?: string[];
+      price?: number;
+      latestDate?: string;
+      onQuoteDay?: boolean;
+    }>>(
       `/api/market/products/${encodeURIComponent(code)}/specs`
+      + (materialId ? `?materialId=${encodeURIComponent(materialId)}` : '')
     ),
   marketCrawlLatest: () => request<MarketCrawlLogRow[]>('/api/market/crawl/latest')
 };

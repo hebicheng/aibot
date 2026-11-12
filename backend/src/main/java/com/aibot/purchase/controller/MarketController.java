@@ -161,10 +161,17 @@ public class MarketController {
   public record QuotePriceUpdate(java.math.BigDecimal price, String currentBatchId) {
   }
 
-  /** 指定产品的行情规格候选（人工绑定下拉用）：规格 + 该规格有哪些来源渠道。 */
+  /**
+   * 指定产品的行情规格候选（人工绑定下拉用）：规格 + 该规格有哪些来源渠道 + 最近有价日。
+   *
+   * <p>materialId 决定日期口径：候选按该材料的取价日（≤ 单据日期最近有该产品行情的一天）取，
+   * 与锁价同一天，避免「人工导入的旧日期行情在候选里消失」。不传则按今天解析。
+   */
   @GetMapping("/products/{code}/specs")
-  public ApiResponse<List<Map<String, Object>>> productSpecs(@PathVariable String code) {
-    return ApiResponse.ok(matchService.candidateSpecs(code));
+  public ApiResponse<List<Map<String, Object>>> productSpecs(
+      @PathVariable String code,
+      @RequestParam(required = false) String materialId) {
+    return ApiResponse.ok(matchService.candidateSpecs(code, materialId));
   }
 
   /** 手动触发全量爬取。 */

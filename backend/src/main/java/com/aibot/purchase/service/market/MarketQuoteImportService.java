@@ -57,6 +57,8 @@ public class MarketQuoteImportService {
   private final DeliveryNetPriceService deliveryNetPriceService;
   private final ChatMessageMapper chatMessageMapper;
   private final ObjectMapper objectMapper;
+  /** 行情城市维度：识别出的城市必须过白名单，否则会把产地（如「中天」）当城市写进唯一键。 */
+  private final MarketCities marketCities;
 
   public MarketQuoteImportService(
       MarketQuoteMapper quoteMapper,
@@ -65,7 +67,8 @@ public class MarketQuoteImportService {
       MaterialQuoteBindingService bindingService,
       DeliveryNetPriceService deliveryNetPriceService,
       ChatMessageMapper chatMessageMapper,
-      ObjectMapper objectMapper
+      ObjectMapper objectMapper,
+      MarketCities marketCities
   ) {
     this.quoteMapper = quoteMapper;
     this.productMapper = productMapper;
@@ -74,6 +77,7 @@ public class MarketQuoteImportService {
     this.deliveryNetPriceService = deliveryNetPriceService;
     this.chatMessageMapper = chatMessageMapper;
     this.objectMapper = objectMapper;
+    this.marketCities = marketCities;
   }
 
   /** 导入结果摘要（供聊天卡片回显）。 */
@@ -136,7 +140,14 @@ public class MarketQuoteImportService {
     }
     Map<String, Object> payload = fromJson(card.getPayload());
     List<Map<String, Object>> rows = castRows(payload.get("rows"));
-    String city = text(payload.get("city"));
+    // 城市必须过白名单（2026-11-12）：截图里的「产地/钢厂」列曾被识别成城市（如「中天」），
+    // 而唯一键含 city → 同规格同产地插入第二条，取价再平均成两边都不靠的价。
+    // 认不出来就当未标注，落本批次行情城市。
+    String rawCity = text(payload.get("city"));
+    String city = marketCities.resolve(rawCity);
+    if (rawCity != null && !rawCity.equals(city)) {
+      log.warn("行情导入：城市「{}」不在已知城市内，按未标注处理 → 使用默认城市「{}」", rawCity, city);
+    }
     LocalDate quoteDate = parseDate(text(payload.get("quoteDate")));
 
     int imported = 0;

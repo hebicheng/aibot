@@ -82,6 +82,9 @@ app:
   crawler-enabled-scheduled: ${APP_CRAWLER_ENABLED_SCHEDULED:true}
   # gtgqw 爬取城市列表（逗号分隔），默认杭州
   crawl-cities: ${APP_CRAWL_CITIES:杭州}
+  # 本批次行情城市（2026-11-12）：城市是行情的一个维度，取价只在本城市内按产地优先，
+  # 绝不跨城市平均。当前只用杭州一个市场，将来接项目/批次城市时改这里即可。
+  market-city: ${APP_MARKET_CITY:杭州}
 
 management:
   endpoints:

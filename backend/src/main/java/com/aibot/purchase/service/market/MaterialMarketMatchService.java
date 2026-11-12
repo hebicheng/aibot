@@ -1,9 +1,11 @@
 package com.aibot.purchase.service.market;
 
+import com.aibot.purchase.entity.BatchMaterial;
 import com.aibot.purchase.entity.Material;
 import com.aibot.purchase.entity.MaterialMarketMapping;
 import com.aibot.purchase.entity.MarketProduct;
 import com.aibot.purchase.entity.MarketQuote;
+import com.aibot.purchase.mapper.BatchMaterialMapper;
 import com.aibot.purchase.mapper.MaterialMapper;
 import com.aibot.purchase.mapper.MaterialMarketMappingMapper;
 import com.aibot.purchase.mapper.MarketProductMapper;
@@ -44,6 +46,7 @@ public class MaterialMarketMatchService {
   private final MaterialMarketMappingMapper mappingMapper;
   private final MarketProductMapper productMapper;
   private final MarketQuoteMapper quoteMapper;
+  private final BatchMaterialMapper batchMaterialMapper;
   private final QwenClient qwenClient;
   private final ObjectMapper objectMapper;
   private final BillingService billingService;
@@ -53,6 +56,7 @@ public class MaterialMarketMatchService {
       MaterialMarketMappingMapper mappingMapper,
       MarketProductMapper productMapper,
       MarketQuoteMapper quoteMapper,
+      BatchMaterialMapper batchMaterialMapper,
       QwenClient qwenClient,
       ObjectMapper objectMapper,
       BillingService billingService
@@ -61,6 +65,7 @@ public class MaterialMarketMatchService {
     this.mappingMapper = mappingMapper;
     this.productMapper = productMapper;
     this.quoteMapper = quoteMapper;
+    this.batchMaterialMapper = batchMaterialMapper;
     this.qwenClient = qwenClient;
     this.objectMapper = objectMapper;
     this.billingService = billingService;
@@ -534,41 +539,167 @@ public class MaterialMarketMatchService {
     return rows.isEmpty() ? LocalDate.now() : rows.get(0).getQuoteDate();
   }
 
-  /** 候选规格清单（人工绑定下拉用）。 */
+  /** 候选窗口：该产品 ≤ 取价日的最近 N 个行情日。8 天足够覆盖「今天爬取 + 几天前人工导入」。 */
+  private static final int CANDIDATE_DAYS = 8;
+  /** 候选规格上限（一个产品一天通常几十条规格）。 */
+  private static final int CANDIDATE_LIMIT = 400;
+
+  /** 候选规格清单（人工绑定下拉用，无材料上下文时按今天解析取价日）。 */
   public List<Map<String, Object>> candidateSpecs(String productCode) {
+    return candidateSpecs(productCode, null);
+  }
+
+  /**
+   * 候选规格清单（人工绑定下拉用）。
+   *
+   * <p><b>日期口径（2026-11-12 修）</b>：原来只取「全库最新行情日」，而取价是按单据日期解析出的
+   * 「取价日」。人工导入的权威行情（截图日期常是过去的某天）一旦不是全库最新日，就整批从候选里消失——
+   * 用户在行情库里明明看得见，绑定下拉里却绑不上。
+   *
+   * <p>现在候选 = 「该产品 ≤ 该材料取价日的最近 {@value #CANDIDATE_DAYS} 个行情日」内的全部规格：
+   * 取价日当天有价的排前面（这些才真能取到价），其余带上最近有价日期，让用户看得见差价风险。
+   * 取价日口径与 {@code MaterialLayerService}/{@code DeliveryNetPriceService} 一致（≤ 期望日最近
+   * 有该产品行情的一天），保证「下拉里选的」和「锁价命中的」是同一天。
+   *
+   * @param materialId 材料行 id（可空）。用于取该材料的取价日基准（batch_materials.quote_date）。
+   */
+  public List<Map<String, Object>> candidateSpecs(String productCode, String materialId) {
     if (!StringUtils.hasText(productCode)) {
       return List.of();
     }
-    LocalDate date = latestQuoteDate();
+    LocalDate day = resolveQuoteDay(materialQuoteDate(materialId), productCode);
+    if (day == null) {
+      return List.of();
+    }
+    List<LocalDate> window = recentQuoteDays(productCode, day);
     // 同一规格可能同时有 mysteel（权威/人工导入）和 gtgqw（爬取）两份，绑定只钉产品+规格，
-    // 取价日由单据日期自动解析——候选里能帮用户区分的只有来源渠道，不是日期（2026-11-11）
+    // 取价日由单据日期自动解析——候选里能帮用户区分的只有来源渠道与最近有价日
     List<MarketQuote> quotes = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
-        .eq(MarketQuote::getQuoteDate, date)
         .eq(MarketQuote::getProductCode, productCode)
-        .select(MarketQuote::getSpecName, MarketQuote::getSource, MarketQuote::getPrice)
-        .last("LIMIT 400"));
-    Map<String, Map<String, Object>> bySpec = new LinkedHashMap<>();
+        .in(MarketQuote::getQuoteDate, window)
+        .select(MarketQuote::getQuoteDate, MarketQuote::getSpecName, MarketQuote::getSource,
+            MarketQuote::getPrice)
+        .last("LIMIT 1200"));
+    Map<String, List<MarketQuote>> rowsBySpec = new LinkedHashMap<>();
     for (MarketQuote quote : quotes) {
       if (!StringUtils.hasText(quote.getSpecName())) {
         continue;
       }
-      Map<String, Object> row = bySpec.computeIfAbsent(quote.getSpecName(), spec -> {
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("spec", spec);
-        item.put("sources", new LinkedHashSet<String>());
-        item.put("price", null);
-        return item;
-      });
-      if (StringUtils.hasText(quote.getSource())) {
-        @SuppressWarnings("unchecked")
-        Set<String> sources = (Set<String>) row.get("sources");
-        sources.add(quote.getSource());
+      rowsBySpec.computeIfAbsent(quote.getSpecName(), spec -> new ArrayList<>()).add(quote);
+    }
+    List<Map<String, Object>> result = new ArrayList<>();
+    for (Map.Entry<String, List<MarketQuote>> entry : rowsBySpec.entrySet()) {
+      List<MarketQuote> rows = entry.getValue();
+      LocalDate latest = rows.stream()
+          .map(MarketQuote::getQuoteDate)
+          .filter(java.util.Objects::nonNull)
+          .max((left, right) -> left.compareTo(right))
+          .orElse(null);
+      List<MarketQuote> dayRows = rows.stream()
+          .filter(row -> day.equals(row.getQuoteDate()))
+          .toList();
+      // 有取价日当天的行就只看当天（来源/价格都以当天为准），否则退回该规格最近有价日
+      List<MarketQuote> effective = dayRows.isEmpty()
+          ? rows.stream().filter(row -> latest != null && latest.equals(row.getQuoteDate())).toList()
+          : dayRows;
+      Set<String> sources = new LinkedHashSet<>();
+      for (MarketQuote row : effective) {
+        if (StringUtils.hasText(row.getSource())) {
+          sources.add(row.getSource());
+        }
       }
-      if (row.get("price") == null && quote.getPrice() != null) {
-        row.put("price", quote.getPrice());
+      Map<String, Object> item = new LinkedHashMap<>();
+      item.put("spec", entry.getKey());
+      item.put("sources", sources);
+      item.put("price", candidatePrice(effective));
+      item.put("latestDate", latest == null ? null : latest.toString());
+      item.put("onQuoteDay", !dayRows.isEmpty());
+      result.add(item);
+    }
+    // 取价日当天有价的排前面（这些才真能取到价），其余按规格名稳定排序
+    result.sort((left, right) -> {
+      boolean leftOnDay = Boolean.TRUE.equals(left.get("onQuoteDay"));
+      boolean rightOnDay = Boolean.TRUE.equals(right.get("onQuoteDay"));
+      if (leftOnDay != rightOnDay) {
+        return leftOnDay ? -1 : 1;
+      }
+      return String.valueOf(left.get("spec")).compareTo(String.valueOf(right.get("spec")));
+    });
+    return result.size() > CANDIDATE_LIMIT
+        ? new ArrayList<>(result.subList(0, CANDIDATE_LIMIT)) : result;
+  }
+
+  /**
+   * 候选里展示的价格：权威来源（mysteel 人工导入）优先于爬取价——与取价排序同口径。
+   * 只用于候选列表的参考价，真正落库的价仍由锁价引擎按产地/来源规则取。
+   */
+  private static BigDecimal candidatePrice(List<MarketQuote> rows) {
+    MarketQuote authoritative = null;
+    MarketQuote any = null;
+    for (MarketQuote row : rows) {
+      if (row.getPrice() == null) {
+        continue;
+      }
+      if (any == null) {
+        any = row;
+      }
+      if (authoritative == null && "mysteel".equals(row.getSource())) {
+        authoritative = row;
       }
     }
-    return new ArrayList<>(bySpec.values());
+    MarketQuote picked = authoritative != null ? authoritative : any;
+    return picked == null ? null : picked.getPrice();
+  }
+
+  /** 材料行的取价日基准（原始单据日期）；无材料上下文时返回 null，由调用方按「今天」解析。 */
+  private LocalDate materialQuoteDate(String materialId) {
+    if (!StringUtils.hasText(materialId)) {
+      return null;
+    }
+    BatchMaterial material = batchMaterialMapper.selectById(materialId);
+    return material == null ? null : material.getQuoteDate();
+  }
+
+  /**
+   * 取价日：≤ 期望日期最近的「该产品」有行情日；期望日期早于行情起点时取最早行情日。
+   * 按产品而非全局解析——某天只导了某个品类，不该遮掉其他品类自己的最近行情日。
+   */
+  private LocalDate resolveQuoteDay(LocalDate wanted, String productCode) {
+    LocalDate target = wanted != null ? wanted : LocalDate.now();
+    List<MarketQuote> hit = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
+        .le(MarketQuote::getQuoteDate, target)
+        .eq(MarketQuote::getProductCode, productCode)
+        .orderByDesc(MarketQuote::getQuoteDate)
+        .last("LIMIT 1"));
+    if (!hit.isEmpty()) {
+      return hit.get(0).getQuoteDate();
+    }
+    List<MarketQuote> earliest = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
+        .eq(MarketQuote::getProductCode, productCode)
+        .orderByAsc(MarketQuote::getQuoteDate)
+        .last("LIMIT 1"));
+    return earliest.isEmpty() ? null : earliest.get(0).getQuoteDate();
+  }
+
+  /** 该产品 ≤ day 的最近 N 个有行情日（去重、倒序），day 本身必在首位。 */
+  private List<LocalDate> recentQuoteDays(String productCode, LocalDate day) {
+    List<MarketQuote> rows = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
+        .eq(MarketQuote::getProductCode, productCode)
+        .le(MarketQuote::getQuoteDate, day)
+        .select(MarketQuote::getQuoteDate)
+        .groupBy(MarketQuote::getQuoteDate)
+        .orderByDesc(MarketQuote::getQuoteDate)
+        .last("LIMIT " + CANDIDATE_DAYS));
+    List<LocalDate> days = new ArrayList<>();
+    for (MarketQuote row : rows) {
+      if (row.getQuoteDate() != null && !days.contains(row.getQuoteDate())) {
+        days.add(row.getQuoteDate());
+      }
+    }
+    if (days.isEmpty()) {
+      days.add(day);
+    }
+    return days;
   }
 
   /**

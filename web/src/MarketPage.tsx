@@ -137,6 +137,34 @@ function MarketSelect({
   );
 }
 
+/** 规格候选 → 下拉选项：标注来源渠道；取价日当天没价的补「最近有价」日期，并保留当前绑定值。 */
+function specBindOptions(
+  rows: Array<{
+    spec: string;
+    sources?: string[];
+    price?: number;
+    latestDate?: string;
+    onQuoteDay?: boolean;
+  }>,
+  current: string
+): SelectOption[] {
+  const options = rows.map((row) => {
+    const parts = [row.spec];
+    if (row.sources && row.sources.length > 0) {
+      parts.push(row.sources.join(' / '));
+    }
+    if (row.onQuoteDay === false && row.latestDate) {
+      parts.push(`最近有价 ${row.latestDate}`);
+    }
+    return { value: row.spec, label: parts.join(' · ') };
+  });
+  // 已绑定的规格不在候选窗口内（老绑定/取价日无此规格）：保留一条，避免打开弹框就显示占位符
+  if (current && !options.some((option) => option.value === current)) {
+    options.unshift({ value: current, label: `${current} · 当前绑定` });
+  }
+  return options;
+}
+
 export function MarketPage({
   projects,
   currentProject,
@@ -183,9 +211,15 @@ export function MarketPage({
   const [editMaterialQuote, setEditMaterialQuote] = useState<MaterialRow | null>(null);
   const [editMaterialPrice, setEditMaterialPrice] = useState('');
   const [savingMaterialPrice, setSavingMaterialPrice] = useState(false);
-  // 规格候选按「当前选中的行情产品」实时拉取
+  // 规格候选按「当前选中的行情产品 + 该材料的取价日」实时拉取
   const [bindSpecOptions, setBindSpecOptions] =
-    useState<Array<{ spec: string; sources?: string[]; price?: number }>>([]);
+    useState<Array<{
+      spec: string;
+      sources?: string[];
+      price?: number;
+      latestDate?: string;
+      onQuoteDay?: boolean;
+    }>>([]);
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -199,7 +233,9 @@ export function MarketPage({
     }
     let cancelled = false;
     api
-      .marketProductSpecs(bindProduct)
+      // 带上材料 id：候选按该材料的取价日（≤单据日期最近有该产品行情的一天）取，
+      // 与锁价同一天，人工导入的旧日期行情才不会在候选里消失
+      .marketProductSpecs(bindProduct, bindMaterialRow.id)
       .then((specs) => {
         if (!cancelled) setBindSpecOptions(specs || []);
       })
@@ -852,16 +888,17 @@ export function MarketPage({
                       : '— 选择规格 —'
                 }
                 disabled={!bindProduct || bindSpecOptions.length === 0}
-                options={bindSpecOptions.map((option) => ({
-                  value: option.spec,
-                  // 同名规格可能有两个来源，绑定时按来源区分（取价日由单据日期自动解析，不看日期）
-                  label: option.sources && option.sources.length > 0
-                    ? `${option.spec} · ${option.sources.join(' / ')}`
-                    : option.spec
-                }))}
+                options={specBindOptions(bindSpecOptions, bindSpec)}
                 onChange={setBindSpec}
                 width="100%"
               />
+              {bindProduct && (
+                <small className="market-field-hint">
+                  候选 = 该材料取价日
+                  {bindMaterialRow.quoteDate ? `（${bindMaterialRow.quoteDate}）` : ''}及之前 8 个行情日内的规格；
+                  标「最近有价」的是当天没价、只有别的日子有价，绑定后这个取价日仍取不到价。
+                </small>
+              )}
             </div>
             <div className="market-field">
               <span>人工销售价（选填，元/吨）</span>

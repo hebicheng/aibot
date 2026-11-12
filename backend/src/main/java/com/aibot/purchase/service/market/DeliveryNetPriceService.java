@@ -66,6 +66,8 @@ public class DeliveryNetPriceService {
   private final PurchaseCostResolver costResolver;
   private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
   private final com.aibot.purchase.service.FreightService freightService;
+  /** 行情城市维度：取价先按本批次行情城市过滤，绝不跨城市平均（2026-11-12）。 */
+  private final MarketCities marketCities;
 
   /** 默认销售上浮（全局配置，默认 30；仅作为无定价指令时的缺省，只影响之后确认的送货单）。 */
   @Value("${purchase.sales-uplift:30}")
@@ -182,7 +184,8 @@ public class DeliveryNetPriceService {
       BatchHintService batchHintService,
       PurchaseCostResolver costResolver,
       com.fasterxml.jackson.databind.ObjectMapper objectMapper,
-      com.aibot.purchase.service.FreightService freightService
+      com.aibot.purchase.service.FreightService freightService,
+      MarketCities marketCities
   ) {
     this.itemMapper = itemMapper;
     this.mappingMapper = mappingMapper;
@@ -197,6 +200,7 @@ public class DeliveryNetPriceService {
     this.costResolver = costResolver;
     this.objectMapper = objectMapper;
     this.freightService = freightService;
+    this.marketCities = marketCities;
   }
 
   /** 锁定结果摘要：matched=按口径定价行数 / fallback=回退单据金额行数 / pending=待 AI 兜底行数 /
@@ -631,7 +635,9 @@ public class DeliveryNetPriceService {
           MarketNameNormalizer.parse(item.getMaterialName(), item.getSpec());
       MarketQuote aiQuote = null;
       if (day != null && parsed.productCode() != null) {
-        List<MarketQuote> rows = quotesForProduct(parsed.productCode(), quoteTarget, quotesByProduct);
+        // AI 兜底也只在本城市行情里选，避免把别的市场的规格价带进来
+        List<MarketQuote> rows = marketCities.preferCity(
+            quotesForProduct(parsed.productCode(), quoteTarget, quotesByProduct));
         aiQuote = matchService.aiMatchQuote(
             item.getMaterialName(), parsed.spec(), parsed.grade(), doc.getBatchId(), rows);
       }
@@ -1041,7 +1047,8 @@ public class DeliveryNetPriceService {
     MarketQuote bound = null;
     if (day != null && pq != null && "吨".equals(pq.unit())
         && StringUtils.hasText(mapping.getProductCode()) && StringUtils.hasText(mapping.getSpecName())) {
-      List<MarketQuote> rows = quotesForProduct(mapping.getProductCode(), target, quotesByProduct);
+      List<MarketQuote> rows = marketCities.preferCity(
+          quotesForProduct(mapping.getProductCode(), target, quotesByProduct));
       bound = rows.stream()
           .filter(r -> mapping.getSpecName().equals(r.getSpecName()))
           .filter(r -> r.getPrice() != null && r.getPrice().signum() > 0)
@@ -1100,7 +1107,8 @@ public class DeliveryNetPriceService {
     List<MarketQuote> rows;
     String method;
     if (binding != null) {
-      rows = quotesForProduct(binding.productCode(), target, quotesByProduct);
+      rows = marketCities.preferCity(
+          quotesForProduct(binding.productCode(), target, quotesByProduct));
       quote = rows.stream()
           .filter(r -> binding.specName().equals(r.getSpecName()))
           .filter(r -> r.getPrice() != null && r.getPrice().signum() > 0)
@@ -1115,14 +1123,16 @@ public class DeliveryNetPriceService {
       if (parsed.productCode() == null || parsed.spec() == null) {
         return null;
       }
-      rows = quotesForProduct(parsed.productCode(), target, quotesByProduct);
+      rows = marketCities.preferCity(
+          quotesForProduct(parsed.productCode(), target, quotesByProduct));
       quote = matchService.matchFromRows(rows, parsed.spec(), parsed.grade());
       if (quote == null) {
         return new GroupMatch(null, null, null, "unmatched");
       }
       method = "exact";
     }
-    // 取价口径：明细行有产地时优先匹配该产地行情；产地未命中再回退同规格全产地均价
+    // 取价口径：先按本城市行情过滤（上面已做，跨城市绝不平均）；明细行有产地时优先匹配该产地行情，
+    // 产地未命中再回退同城市同规格全产地均价
     List<MarketQuote> sameSpec = rows.stream()
         .filter(r -> quote.getSpecName() != null && quote.getSpecName().equals(r.getSpecName()))
         .filter(r -> r.getPrice() != null && r.getPrice().signum() > 0)

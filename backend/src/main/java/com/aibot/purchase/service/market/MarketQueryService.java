@@ -29,10 +29,6 @@ import org.springframework.util.StringUtils;
  */
 @Service
 public class MarketQueryService {
-  private static final List<String> DEFAULT_CITIES = List.of(
-      "成都", "北京", "上海", "广州", "杭州", "武汉", "西安", "重庆", "天津", "南京",
-      "沈阳", "福州", "长沙", "郑州", "昆明", "济南", "合肥", "南昌", "太原", "哈尔滨",
-      "石家庄", "大连", "海口");
 
   private final MarketQuoteMapper quoteMapper;
   private final MarketProductMapper productMapper;
@@ -40,6 +36,8 @@ public class MarketQueryService {
   private final com.aibot.purchase.mapper.DocumentItemMapper documentItemMapper;
   private final com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper;
   private final BusinessQueryService businessQueryService;
+  /** 城市维度的唯一来源（白名单 + 本批次行情城市）。 */
+  private final MarketCities marketCities;
 
   public MarketQueryService(
       MarketQuoteMapper quoteMapper,
@@ -47,7 +45,8 @@ public class MarketQueryService {
       com.aibot.purchase.mapper.DocumentMapper documentMapper,
       com.aibot.purchase.mapper.DocumentItemMapper documentItemMapper,
       com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper,
-      BusinessQueryService businessQueryService
+      BusinessQueryService businessQueryService,
+      MarketCities marketCities
   ) {
     this.quoteMapper = quoteMapper;
     this.productMapper = productMapper;
@@ -55,6 +54,7 @@ public class MarketQueryService {
     this.documentItemMapper = documentItemMapper;
     this.itemNetMappingMapper = itemNetMappingMapper;
     this.businessQueryService = businessQueryService;
+    this.marketCities = marketCities;
   }
 
   /** 最新行情日期（库中最大的 quote_date）。 */
@@ -119,7 +119,7 @@ public class MarketQueryService {
         .toList(), cities, origins);
   }
 
-  /** 最新一日的城市列表（数据驱动；无数据时回退默认城市，避免筛选器为空）。 */
+  /** 最新一日的城市列表（数据驱动，只认白名单内的城市；无数据时回退已知城市，避免筛选器为空）。 */
   private List<String> distinctCities() {
     List<String> cities = quoteMapper.selectList(Wrappers.<MarketQuote>lambdaQuery()
             .eq(MarketQuote::getQuoteDate, latestDate())
@@ -128,10 +128,12 @@ public class MarketQueryService {
             .ne(MarketQuote::getCity, "")
             .last("LIMIT 200"))
         .stream()
-        .map(MarketQuote::getCity)
+        // 只认合法城市：历史脏值（如把产地「中天」写进 city）不进筛选器
+        .map(quote -> MarketCities.normalize(quote.getCity()))
+        .filter(java.util.Objects::nonNull)
         .distinct()
         .toList();
-    return cities.isEmpty() ? DEFAULT_CITIES : cities;
+    return cities.isEmpty() ? MarketCities.known() : cities;
   }
 
   /** 最新一日的产地列表（去重）。 */
@@ -154,7 +156,8 @@ public class MarketQueryService {
    */
   public BatchCompare compareBatch(String ownerId, String batchId, String city, String origin) {
     BatchDto batch = businessQueryService.getBatch(ownerId, batchId);
-    String compareCity = StringUtils.hasText(city) ? city : "杭州";
+    // 城市不传就用本批次行情城市（不再硬编码「杭州」，改由配置决定）
+    String compareCity = marketCities.resolve(city);
     String compareOrigin = StringUtils.hasText(origin) ? origin : null;
     LocalDate date = latestDate();
 

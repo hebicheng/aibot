@@ -57,6 +57,7 @@ public class MaterialLayerService {
   private final DeliveryNetPriceService deliveryNetPriceService;
   private final MaterialReconcileService reconcileService;
   private final com.aibot.purchase.service.market.MarketQuoteImportService marketQuoteImportService;
+  private final MarketCities marketCities;
 
   public MaterialLayerService(
       BatchMaterialMapper materialMapper,
@@ -68,7 +69,8 @@ public class MaterialLayerService {
       PurchaseSalePriceService purchaseSalePriceService,
       DeliveryNetPriceService deliveryNetPriceService,
       MaterialReconcileService reconcileService,
-      com.aibot.purchase.service.market.MarketQuoteImportService marketQuoteImportService
+      com.aibot.purchase.service.market.MarketQuoteImportService marketQuoteImportService,
+      MarketCities marketCities
   ) {
     this.materialMapper = materialMapper;
     this.documentMapper = documentMapper;
@@ -80,6 +82,7 @@ public class MaterialLayerService {
     this.deliveryNetPriceService = deliveryNetPriceService;
     this.reconcileService = reconcileService;
     this.marketQuoteImportService = marketQuoteImportService;
+    this.marketCities = marketCities;
   }
 
   /** 材料清单行：身份 + 绑定 + 两侧聚合 + 锁定网价（取价日 = ≤单据日期最近有行情日）。 */
@@ -310,7 +313,8 @@ public class MaterialLayerService {
   }
 
   /**
-   * 某日某行情规格的价格：产地优先（与取价同规则，互相包含算命中），产地未命中回退该规格全产地均价。
+   * 某日某行情规格的价格：先按「本批次行情城市」过滤（绝不跨城市平均），
+   * 再产地优先（与取价同规则，互相包含算命中），产地未命中回退该规格同城市均价。
    */
   private BigDecimal specPrice(LocalDate date, String productCode, String specName,
                                String materialOrigin,
@@ -318,7 +322,8 @@ public class MaterialLayerService {
     if (date == null) {
       return null;
     }
-    List<com.aibot.purchase.entity.MarketQuote> sameSpec = quotesOf(date, productCode, cache)
+    List<com.aibot.purchase.entity.MarketQuote> sameSpec = marketCities.preferCity(
+            quotesOf(date, productCode, cache))
         .stream()
         .filter(quote -> specName.equals(quote.getSpecName()))
         .filter(quote -> quote.getPrice() != null && quote.getPrice().signum() > 0)
@@ -446,7 +451,8 @@ public class MaterialLayerService {
           org.springframework.http.HttpStatus.BAD_REQUEST,
           "取价日（" + day + "）没有该规格的行情，无法改价");
     }
-    String city = sameSpec.get(0).getCity();
+    // 改价只改「本批次行情城市」的那条权威价（历史脏数据里同规格可能还挂着别的城市/产地当城市的行）
+    String city = marketCities.preferCity(sameSpec).get(0).getCity();
     String origin = StringUtils.hasText(material.getOrigin()) ? material.getOrigin() : "";
     com.aibot.purchase.entity.MarketQuote existing = quoteMapper.selectOne(
         Wrappers.<com.aibot.purchase.entity.MarketQuote>lambdaQuery()

@@ -453,6 +453,24 @@ function MarketQuoteCard({
   const changeText = (value: number | null) =>
     value == null ? '-' : `${value > 0 ? '+' : ''}${value}`;
 
+  // 识别日期核对提示（2026-11-12）：补录历史行情是正常业务，不拦截导入；
+  // 但年份不是今年、或日期晚于今天时，在卡上显著提示，让用户在确认前就核对。
+  const dateNotice = (() => {
+    if (answered) return '';
+    const text = (editing ? draft.quoteDate : committed.quoteDate)?.trim();
+    if (!text) return '';
+    const now = new Date();
+    const todayText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (text > todayText) {
+      return `识别日期 ${text} 晚于今天（${todayText}），截图日期可能没认对，确认前请核对。`;
+    }
+    const year = Number(text.slice(0, 4));
+    if (Number.isFinite(year) && year !== now.getFullYear()) {
+      return `识别日期 ${text} 不是今年（${now.getFullYear()} 年）。补录历史行情没问题；若是年份认错了，点「编辑」改日期再确认。`;
+    }
+    return '';
+  })();
+
   return (
     <div className="chat-recognition-card">
       <div className="chat-card-heading">
@@ -543,6 +561,13 @@ function MarketQuoteCard({
           )}
         </div>
       </div>
+
+      {dateNotice && (
+        <div className="chat-card-note">
+          <AlertCircle size={15} />
+          {dateNotice}
+        </div>
+      )}
 
       <div className="chat-card-note">
         <AlertCircle size={15} />

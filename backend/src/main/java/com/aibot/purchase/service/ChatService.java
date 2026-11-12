@@ -178,27 +178,10 @@ public class ChatService {
   @Transactional
   public ChatAppendResponse confirmQuoteCard(String userId, String messageId) {
     ChatMessage pendingQuote = requirePendingQuoteCard(userId, messageId);
-    // 年份护栏：截图只显示「月-日」时模型可能臆造年份（把 2026-09-16 补成 2024），
-    // 落到任何批次都取不到的死日期。年份与当前不符就不归档、不落库，让用户在卡上改完日期再确认。
-    Map<String, Object> payload = fromJson(pendingQuote.getPayload());
-    String quoteDateText = payload.get("quoteDate") == null ? "" : String.valueOf(payload.get("quoteDate")).trim();
-    if (StringUtils.hasText(quoteDateText)) {
-      try {
-        int year = java.time.LocalDate.parse(quoteDateText).getYear();
-        int currentYear = java.time.LocalDate.now().getYear();
-        if (year != currentYear) {
-          ChatMessage warn = insertMessage(userId, pendingQuote.getProjectId(), pendingQuote.getBatchId(),
-              "AI", "TEXT", "market_quote_card",
-              "识别到的行情日期是 " + quoteDateText + "，年份与当前年份（" + currentYear
-                  + "）不符——截图只显示月-日时 AI 可能补错了年份，这样的行情任何批次都取不到。"
-                  + "请点卡片上的「编辑」把日期改成正确年份后再确认导入（卡片仍保留，未写入行情库）。",
-              "done", null);
-          return new ChatAppendResponse(List.of(toDto(warn)));
-        }
-      } catch (java.time.format.DateTimeParseException ignored) {
-        // 非法日期由导入逻辑的兜底（按今天）处理
-      }
-    }
+    // 日期不做硬性拦截（2026-11-12 改）：补录历史行情是正常业务（去年的截图、旧价回填），
+    // 年份不等于今年不代表识别错。真正的核对交给卡片——卡上展示日期、可编辑，
+    // 识别日期可疑（非今年/晚于今天）时卡片会显著提示，用户确认即代表认可这个日期。
+    // 曾经的「年份不符就拒绝导入」把用户核对过的数据挡在门外，且只追加一条文本、不落库，容易误解。
     // 先导入后归档：confirm 内部会按 status=pending 重查这张卡读取行情行，
     // 先归档它就查不到了（2026-11-04 修：导入 0 条的根因）
     var outcome = marketQuoteImportService.confirm(userId, pendingQuote.getBatchId());
