@@ -25,6 +25,8 @@ public class Batch {
   private BigDecimal profitAmount;
   private BigDecimal marginRate;
   private String remark;
+  /** 是否已对账：人工勾选（V29） */
+  private Boolean reconciled;
   /** 批次级业务默认口径（MySQL JSON 列），结构见 V17 迁移注释，由 BatchHintInterceptor 统一读写 */
   private String businessHints;
   private LocalDateTime createdAt;

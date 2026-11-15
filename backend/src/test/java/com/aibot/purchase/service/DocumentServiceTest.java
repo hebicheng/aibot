@@ -654,7 +654,7 @@ class DocumentServiceTest {
     return new BatchDto(
         "batch-1", "project-1", "测试项目", "测试批次", LocalDate.of(2026, 7, 20),
         "钢筋", "进行中", 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-        BigDecimal.ZERO, null, java.util.Map.of(), null
+        BigDecimal.ZERO, null, java.util.Map.of(), null, false, BigDecimal.ZERO, "未收款"
     );
   }
 

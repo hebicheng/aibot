@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+@Component
 @ConditionalOnProperty(name = "storage.type", havingValue = "local", matchIfMissing = true)
 public class LocalFileStorage implements FileStorage {
   private static final Logger log = LoggerFactory.getLogger(LocalFileStorage.class);

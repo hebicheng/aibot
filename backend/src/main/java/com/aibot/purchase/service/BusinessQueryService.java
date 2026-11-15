@@ -31,6 +31,7 @@ import com.aibot.purchase.entity.Material;
 import com.aibot.purchase.entity.MaterialMarketMapping;
 import com.aibot.purchase.entity.OperationLog;
 import com.aibot.purchase.entity.Project;
+import com.aibot.purchase.entity.ProjectReceiptAllocation;
 import com.aibot.purchase.entity.Supplier;
 import com.aibot.purchase.entity.SupplierQuote;
 import com.aibot.purchase.mapper.BatchMapper;
@@ -42,6 +43,7 @@ import com.aibot.purchase.mapper.MaterialMapper;
 import com.aibot.purchase.mapper.MaterialMarketMappingMapper;
 import com.aibot.purchase.mapper.OperationLogMapper;
 import com.aibot.purchase.mapper.ProjectMapper;
+import com.aibot.purchase.mapper.ProjectReceiptAllocationMapper;
 import com.aibot.purchase.mapper.SupplierMapper;
 import com.aibot.purchase.mapper.SupplierQuoteMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -80,6 +82,8 @@ public class BusinessQueryService {
   /** 批次口径变更后重算送货单销售价（毛利率口径的定价基数 = 采购价，口径一变锁定值要跟着变）。 */
   private final com.aibot.purchase.service.market.DeliveryNetPriceService deliveryNetPriceService;
 
+  private final ProjectReceiptAllocationMapper allocationMapper;
+
   public BusinessQueryService(
       ProjectMapper projectMapper,
       BatchMapper batchMapper,
@@ -95,8 +99,10 @@ public class BusinessQueryService {
       AggregationService aggregationService,
       com.fasterxml.jackson.databind.ObjectMapper objectMapper,
       @org.springframework.context.annotation.Lazy
-      com.aibot.purchase.service.market.DeliveryNetPriceService deliveryNetPriceService
+      com.aibot.purchase.service.market.DeliveryNetPriceService deliveryNetPriceService,
+      ProjectReceiptAllocationMapper allocationMapper
   ) {
+    this.allocationMapper = allocationMapper;
     this.projectMapper = projectMapper;
     this.batchMapper = batchMapper;
     this.materialMapper = materialMapper;
@@ -186,8 +192,15 @@ public class BusinessQueryService {
           current.paid().add(zero(row.getPaidAmount())),
           current.invoiced().add(zero(row.getInvoiceAmount())),
           current.salesInvoiced().add(zero(row.getSalesInvoiceAmount())),
-          current.received().add(zero(row.getReceivedAmount()))));
+          current.received()));
     }
+    // 总收款取项目收款分摊（2026-11-15）：批次还没有台账行时收款也要计入，不能只看台账投影
+    batchReceived(new ArrayList<>(batchToProject.keySet())).forEach((batchId, amount) -> {
+      String projectId = batchToProject.get(batchId);
+      ProjectFinance current = result.getOrDefault(projectId, ProjectFinance.ZERO);
+      result.put(projectId, new ProjectFinance(current.paid(), current.invoiced(),
+          current.salesInvoiced(), current.received().add(amount)));
+    });
     return result;
   }
 
@@ -269,11 +282,13 @@ public class BusinessQueryService {
     if (projects.isEmpty()) {
       return List.of();
     }
-    return batchMapper.selectList(Wrappers.<Batch>lambdaQuery()
-            .in(Batch::getProjectId, projects.keySet())
-            .orderByDesc(Batch::getUpdatedAt))
-        .stream()
-        .map(batch -> mapBatch(batch, projects.get(batch.getProjectId()).getName()))
+    List<Batch> batches = batchMapper.selectList(Wrappers.<Batch>lambdaQuery()
+        .in(Batch::getProjectId, projects.keySet())
+        .orderByDesc(Batch::getUpdatedAt));
+    Map<String, BigDecimal> received = batchReceived(batches.stream().map(Batch::getId).toList());
+    return batches.stream()
+        .map(batch -> mapBatch(batch, projects.get(batch.getProjectId()).getName(),
+            received.getOrDefault(batch.getId(), BigDecimal.ZERO)))
         .toList();
   }
 
@@ -332,6 +347,9 @@ public class BusinessQueryService {
     }
     if (request.businessHints() != null) {
       batch.setBusinessHints(toJson(request.businessHints()));
+    }
+    if (request.reconciled() != null) {
+      batch.setReconciled(request.reconciled());
     }
     batchMapper.updateById(batch);
     // 口径改了：已锁定的送货单销售价必须重算（毛利率口径按采购价倒推，锁定值不会自己跟着变），
@@ -679,6 +697,23 @@ public class BusinessQueryService {
   }
 
   private BatchDto mapBatch(Batch batch, String projectName) {
+    return mapBatch(batch, projectName, batchReceived(List.of(batch.getId())).getOrDefault(batch.getId(), BigDecimal.ZERO));
+  }
+
+  /** 批次已收款 = Σ 项目收款分摊（未删收款）。批量查询，避免列表 N+1。 */
+  private Map<String, BigDecimal> batchReceived(List<String> batchIds) {
+    if (batchIds.isEmpty()) {
+      return Map.of();
+    }
+    List<ProjectReceiptAllocation> allocations = allocationMapper.selectList(
+        Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+            .in(ProjectReceiptAllocation::getBatchId, batchIds));
+    Map<String, BigDecimal> result = new LinkedHashMap<>();
+    allocations.forEach(a -> result.merge(a.getBatchId(), zero(a.getAmount()), BigDecimal::add));
+    return result;
+  }
+
+  private BatchDto mapBatch(Batch batch, String projectName, BigDecimal received) {
     return new BatchDto(
         batch.getId(),
         batch.getProjectId(),
@@ -694,7 +729,10 @@ public class BusinessQueryService {
         zero(batch.getMarginRate()),
         batch.getRemark(),
         fromJsonMap(batch.getBusinessHints()),
-        instant(batch.getUpdatedAt())
+        instant(batch.getUpdatedAt()),
+        Boolean.TRUE.equals(batch.getReconciled()),
+        received,
+        ReceiptService.receiptStatus(batch.getSalesAmount(), received)
     );
   }
 

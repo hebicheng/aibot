@@ -97,6 +97,76 @@ export type ApiBatch = {
   marginRate: number;
   remark?: string;
   businessHints?: Record<string, ApiBatchHintScope>;
+  /** 是否已对账（人工勾选） */
+  reconciled?: boolean;
+  /** 已收款 = Σ 项目收款在本批次上的分摊 */
+  receivedAmount?: number;
+  receiptStatus?: ReceiptStatus;
+};
+
+export type ReceiptStatus = '未收款' | '部分收款' | '已收款';
+
+export type ApiReceiptAllocation = {
+  batchId: string;
+  batchName: string;
+  material: string;
+  amount: number;
+};
+
+export type ApiReceipt = {
+  id: string;
+  receiptDate: string;
+  amount: number;
+  payer?: string;
+  remark?: string;
+  /** manual=手动登记 / document=智能助理收款单 */
+  source: 'manual' | 'document';
+  allocations: ApiReceiptAllocation[];
+};
+
+export type ApiReceiptBatch = {
+  batchId: string;
+  batchName: string;
+  businessDate?: string;
+  material: string;
+  salesAmount: number;
+  receivedAmount: number;
+  remainingAmount: number;
+  receiptStatus: ReceiptStatus;
+  reconciled: boolean;
+};
+
+export type ApiMaterialReceiptSummary = {
+  material: string;
+  salesAmount: number;
+  receivedAmount: number;
+  differenceAmount: number;
+  batchCount: number;
+};
+
+export type ApiProjectReceiptOverview = {
+  projectId: string;
+  salesAmount: number;
+  receivedAmount: number;
+  differenceAmount: number;
+  receipts: ApiReceipt[];
+  batches: ApiReceiptBatch[];
+  materials: ApiMaterialReceiptSummary[];
+};
+
+export type ApiReceiptSuggestion = {
+  amount: number;
+  allocations: ApiReceiptAllocation[];
+  unallocatedAmount: number;
+};
+
+export type ReceiptSavePayload = {
+  receiptDate: string;
+  amount: number;
+  payer?: string;
+  remark?: string;
+  /** amount 全部为空 = 后端按销售顺序自动分摊；全部有值 = 手动分摊（合计须等于收款金额） */
+  allocations: Array<{ batchId: string; amount?: number | null }>;
 };
 
 export type ApiDocumentItem = {
@@ -554,8 +624,30 @@ export const api = {
     businessDate?: string;
     materialSummary?: string;
     businessHints?: Record<string, unknown> | null;
+    reconciled?: boolean;
   }) => request<ApiBatch>(`/api/batches/${encodeURIComponent(batchId)}`,
     { method: 'PUT', body: JSON.stringify(payload) }),
+  // ---- 项目收款（一笔收款关联多个批次）----
+  receiptOverview: (projectId: string) =>
+    request<ApiProjectReceiptOverview>(`/api/projects/${encodeURIComponent(projectId)}/receipts`),
+  receiptSuggest: (projectId: string, amount: number, batchIds?: string[], excludeReceiptId?: string) => {
+    const params = new URLSearchParams({ amount: String(amount) });
+    (batchIds || []).forEach((id) => params.append('batchIds', id));
+    if (excludeReceiptId) params.set('excludeReceiptId', excludeReceiptId);
+    return request<ApiReceiptSuggestion>(
+      `/api/projects/${encodeURIComponent(projectId)}/receipts/suggest?${params.toString()}`);
+  },
+  createReceipt: (projectId: string, payload: ReceiptSavePayload) =>
+    request<ApiReceipt>(`/api/projects/${encodeURIComponent(projectId)}/receipts`,
+      { method: 'POST', body: JSON.stringify(payload) }),
+  updateReceipt: (projectId: string, receiptId: string, payload: ReceiptSavePayload) =>
+    request<ApiReceipt>(
+      `/api/projects/${encodeURIComponent(projectId)}/receipts/${encodeURIComponent(receiptId)}`,
+      { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteReceipt: (projectId: string, receiptId: string) =>
+    request<void>(
+      `/api/projects/${encodeURIComponent(projectId)}/receipts/${encodeURIComponent(receiptId)}`,
+      { method: 'DELETE' }),
   deleteBatch: (batchId: string) =>
     request<void>(`/api/batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
   batchDetail: (batchId: string) => request(`/api/batches/${batchId}`),

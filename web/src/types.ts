@@ -47,6 +47,12 @@ export interface Batch {
   salesInvoiced: number;
   received: number;
   progress: number;
+  /** 销售金额（应收） */
+  sales: number;
+  /** 是否已对账（人工勾选） */
+  reconciled: boolean;
+  /** 收款状态：未收款 / 部分收款 / 已收款 */
+  receiptStatus: '未收款' | '部分收款' | '已收款';
   /** 批次级业务默认口径（按单据类型 scope 分组，本期仅 delivery_note） */
   businessHints?: Record<string, Record<string, unknown>>;
 }

@@ -77,6 +77,7 @@ import { DataCenterPage } from './DataCenterPage';
 import { summarizeBatchDelivery } from './deliveryMatching';
 import { MarketPage } from './MarketPage';
 import { ReconciliationLedgerPage } from './ReconciliationLedgerPage';
+import { ReceiptPanel, receiptTone } from './ReceiptPanel';
 import type {
   Batch,
   BusinessDocument,
@@ -247,8 +248,11 @@ const mapProjects = (apiProjects: ApiProject[], apiBatches: ApiBatch[]): Project
         paid: 0,
         invoiced: 0,
         salesInvoiced: 0,
-        received: 0,
+        received: Number(batch.receivedAmount || 0),
         progress: Number(batch.progress || 0),
+        sales: Number(batch.salesAmount || 0),
+        reconciled: Boolean(batch.reconciled),
+        receiptStatus: batch.receiptStatus || '未收款',
         businessHints: batch.businessHints
       }));
     return {
@@ -1622,7 +1626,10 @@ function ProjectsPage({
   onDeleteProject,
   onDeleteBatch,
   onEditProject,
-  onEditBatch
+  onEditBatch,
+  onToggleReconciled,
+  onReceiptsChanged,
+  onToast
 }: {
   projectsData: Project[];
   selectedProject: Project;
@@ -1638,6 +1645,9 @@ function ProjectsPage({
   onDeleteBatch: (batch: Batch, project: Project) => void;
   onEditProject: (project: Project) => void;
   onEditBatch: (batch: Batch, project: Project) => void;
+  onToggleReconciled: (batch: Batch, reconciled: boolean) => void;
+  onReceiptsChanged: () => Promise<void> | void;
+  onToast: (message: string) => void;
 }) {
   const batchDocuments = documents.filter((item) => item.batchId === selectedBatch.id);
   const deliverySummary = summarizeBatchDelivery(
@@ -1854,8 +1864,8 @@ function ProjectsPage({
                     <th>采购金额</th>
                     <th>已付款</th>
                     <th>已开票</th>
-                    <th>对账进度</th>
-                    <th>状态</th>
+                    <th>是否已对账</th>
+                    <th>是否已收款</th>
                     <th className="batch-op-col">操作</th>
                   </tr>
                 </thead>
@@ -1874,14 +1884,19 @@ function ProjectsPage({
                       <td>{money(batch.purchase)}</td>
                       <td>{money(batch.paid)}</td>
                       <td>{money(batch.invoiced)}</td>
-                      <td>
-                        <div className="table-progress">
-                          <i style={{ width: `${batch.progress}%` }} />
-                          <span>{batch.progress}%</span>
-                        </div>
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <label className="reconciled-toggle" title="手动勾选：是否已对账">
+                          <input
+                            type="checkbox"
+                            checked={batch.reconciled}
+                            onChange={(event) => onToggleReconciled(batch, event.target.checked)}
+                            aria-label={`${batch.name} 是否已对账`}
+                          />
+                          <span>{batch.reconciled ? '已对账' : '未对账'}</span>
+                        </label>
                       </td>
                       <td>
-                        <StatusBadge tone={statusTone[batch.status]}>{batch.status}</StatusBadge>
+                        <StatusBadge tone={receiptTone[batch.receiptStatus]}>{batch.receiptStatus}</StatusBadge>
                       </td>
                       <td className="batch-op-col">
                         <span className="batch-ops">
@@ -1932,6 +1947,12 @@ function ProjectsPage({
               </table>
             </div>
           </Panel>
+          <ReceiptPanel
+            projectId={selectedProject.id}
+            refreshKey={selectedProject.batches.map((b) => `${b.id}:${b.sales}`).join('|')}
+            onChanged={onReceiptsChanged}
+            onToast={onToast}
+          />
           <Panel
             title="当前批次业务闭环"
             eyebrow={selectedBatch.name}
@@ -3786,7 +3807,8 @@ export default function App() {
             paid: rows.reduce((sum, row) => sum + Number(row.paidAmount || 0), 0),
             invoiced: rows.reduce((sum, row) => sum + Number(row.invoiceAmount || 0), 0),
             salesInvoiced: rows.reduce((sum, row) => sum + Number(row.salesInvoiceAmount || 0), 0),
-            received: rows.reduce((sum, row) => sum + Number(row.receivedAmount || 0), 0)
+            // 已收款以项目收款分摊为准（批次接口已带出），没有台账行的批次也能显示收款
+            received: batch.received
           };
         })
       }))
@@ -3990,6 +4012,27 @@ export default function App() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : '项目更新失败');
     }
+  };
+
+  /** 是否已对账：人工勾选，乐观更新，失败回滚 */
+  const toggleReconciled = async (batch: Batch, reconciled: boolean) => {
+    const patch = (value: boolean) => setProjectsData((items) => items.map((project) => ({
+      ...project,
+      batches: project.batches.map((item) => (item.id === batch.id ? { ...item, reconciled: value } : item))
+    })));
+    patch(reconciled);
+    try {
+      await api.updateBatch(batch.id, { reconciled });
+    } catch (error) {
+      patch(!reconciled);
+      showToast(error instanceof Error ? error.message : '更新对账状态失败');
+    }
+  };
+
+  /** 收款变动 → 项目汇总、批次收款状态、台账都要刷新 */
+  const reloadAfterReceipt = async () => {
+    const loaded = await loadBaseData(projectId, batchId);
+    await refreshContext(loaded.projectId, loaded.batchId, loaded.projects);
   };
 
   const updateBatch = async (payload: BatchCreatePayload) => {
@@ -4445,6 +4488,9 @@ export default function App() {
               onDeleteBatch={requestDeleteBatch}
               onEditProject={setEditProjectTarget}
               onEditBatch={(batch) => setEditBatchTarget(batch)}
+              onToggleReconciled={toggleReconciled}
+              onReceiptsChanged={reloadAfterReceipt}
+              onToast={showToast}
             />
           )}
           {hasContext && page === 'documents' && (

@@ -7,12 +7,16 @@ import com.aibot.purchase.entity.DocumentItem;
 import com.aibot.purchase.entity.DocumentItemMarketMapping;
 import com.aibot.purchase.entity.LedgerRecord;
 import com.aibot.purchase.entity.Project;
+import com.aibot.purchase.entity.ProjectReceipt;
+import com.aibot.purchase.entity.ProjectReceiptAllocation;
 import com.aibot.purchase.mapper.BatchMapper;
 import com.aibot.purchase.mapper.DocumentItemMapper;
 import com.aibot.purchase.mapper.DocumentItemMarketMappingMapper;
 import com.aibot.purchase.mapper.DocumentMapper;
 import com.aibot.purchase.mapper.LedgerRecordMapper;
 import com.aibot.purchase.mapper.ProjectMapper;
+import com.aibot.purchase.mapper.ProjectReceiptAllocationMapper;
+import com.aibot.purchase.mapper.ProjectReceiptMapper;
 import com.aibot.purchase.service.market.DeliveryNetPriceService;
 import com.aibot.purchase.service.market.PurchaseSalePriceService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -49,6 +53,8 @@ public class LedgerService {
   private final BatchHintService batchHintService;
   private final PurchaseSalePriceService salePriceService;
   private final FreightService freightService;
+  private final ProjectReceiptMapper receiptMapper;
+  private final ProjectReceiptAllocationMapper allocationMapper;
 
   public LedgerService(
       DocumentMapper documentMapper,
@@ -60,7 +66,9 @@ public class LedgerService {
       ObjectMapper objectMapper,
       BatchHintService batchHintService,
       PurchaseSalePriceService salePriceService,
-      FreightService freightService
+      FreightService freightService,
+      ProjectReceiptMapper receiptMapper,
+      ProjectReceiptAllocationMapper allocationMapper
   ) {
     this.documentMapper = documentMapper;
     this.documentItemMapper = documentItemMapper;
@@ -72,6 +80,8 @@ public class LedgerService {
     this.batchHintService = batchHintService;
     this.salePriceService = salePriceService;
     this.freightService = freightService;
+    this.receiptMapper = receiptMapper;
+    this.allocationMapper = allocationMapper;
   }
 
   @Transactional
@@ -90,8 +100,14 @@ public class LedgerService {
         }
       }
       case "transport_note", "payment_request", "payment",
-          "purchase_invoice", "invoice", "sales_invoice", "receipt" ->
+          "purchase_invoice", "invoice", "sales_invoice" ->
           applySupplement(document);
+      case "receipt" -> {
+        // 2026-11-15：收款改为项目级收款表（可关联多批次），收款单确认 = 生成一笔关联本批次的收款
+        upsertReceiptFromDocument(document);
+        document.setLedgerApplied(true);
+        documentMapper.updateById(document);
+      }
       case "sales_settlement", "evidence_only" -> {
         document.setLedgerApplied(true);
         documentMapper.updateById(document);
@@ -408,6 +424,9 @@ public class LedgerService {
    */
   @Transactional
   public void removeConfirmedDocument(Document document, List<DocumentItem> items) {
+    if ("receipt".equals(document.getDocType())) {
+      removeReceiptOfDocument(document.getId());
+    }
     List<LedgerRecord> records = getLedgerInternal(document.getBatchId());
     if (!records.isEmpty()) {
       if ("supply_order".equals(document.getDocType())) {
@@ -498,7 +517,11 @@ public class LedgerService {
     if (!before.getDocType().equals(after.getDocType())) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "已入库数据暂不支持修改业务类型，请新建正确类型的数据");
     }
-    if ("supply_order".equals(after.getDocType())) {
+    if ("receipt".equals(after.getDocType())) {
+      upsertReceiptFromDocument(after);
+      after.setLedgerApplied(true);
+      documentMapper.updateById(after);
+    } else if ("supply_order".equals(after.getDocType())) {
       upsertSupplySkeleton(after);
     } else if (List.of(
         "delivery_note", "transport_note", "payment_request", "payment",
@@ -656,8 +679,9 @@ public class LedgerService {
           }
         }
       }
-      case "receipt" ->
-          record.setReceivedAmount(nonNegative(nz(record.getReceivedAmount()).add(signedAmount)));
+      case "receipt" -> {
+        // 已收款由项目收款分摊表统一投影（syncReceivedFromAllocations），这里不再累加
+      }
       default -> {
         // 其他资料只归档，不参与台账数值。
       }
@@ -796,6 +820,7 @@ public class LedgerService {
     if (batch == null) {
       return;
     }
+    syncReceivedFromAllocations(batchId);
     List<LedgerRecord> records = getLedgerInternal(batchId);
     BigDecimal purchase = records.stream()
         .map(record -> nz(record.getPurchaseAmount()).add(nz(record.getFreight())))
@@ -861,6 +886,131 @@ public class LedgerService {
         : (int) Math.round(batches.stream().map(Batch::getProgress).mapToInt(value -> value == null ? 0 : value).average().orElse(0)));
     project.setUpdatedAt(LocalDateTime.now());
     projectMapper.updateById(project);
+  }
+
+  /** 收款变动后由 ReceiptService 调用：把分摊结果投影到台账并重算批次/项目快照。 */
+  @Transactional
+  public void refreshReceived(String batchId) {
+    refreshBatchAndProject(batchId);
+  }
+
+  /** 批次已收款 = Σ 项目收款分摊金额（未删收款）。 */
+  public BigDecimal allocatedReceived(String batchId) {
+    List<ProjectReceiptAllocation> allocations = allocationMapper.selectList(
+        Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+            .eq(ProjectReceiptAllocation::getBatchId, batchId));
+    if (allocations == null || allocations.isEmpty()) {
+      return BigDecimal.ZERO;
+    }
+    return allocations.stream().map(ProjectReceiptAllocation::getAmount).map(LedgerService::nz)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+  }
+
+  /**
+   * 收款分摊表是「已收款」的唯一数据源：批次级金额落在首行，其余行清零（与 salesAmount 等批次级口径一致）。
+   * 值没变不写库。
+   */
+  private void syncReceivedFromAllocations(String batchId) {
+    List<LedgerRecord> records = getLedgerInternal(batchId);
+    if (records.isEmpty()) {
+      return;
+    }
+    BigDecimal received = allocatedReceived(batchId);
+    for (int i = 0; i < records.size(); i++) {
+      LedgerRecord record = records.get(i);
+      BigDecimal target = i == 0 ? received : BigDecimal.ZERO;
+      if (nz(record.getReceivedAmount()).compareTo(target) == 0) {
+        continue;
+      }
+      record.setReceivedAmount(target);
+      recalculate(record);
+      record.setUpdatedAt(LocalDateTime.now());
+      ledgerRecordMapper.updateById(record);
+    }
+  }
+
+  /**
+   * 智能助理确认的收款单 → 项目收款（幂等，按 source_document_id 定位）。
+   * 新建时关联单据所在批次；修正时改日期/金额/付款方，金额差额落在最后一个关联批次上（保持 Σ分摊 = 收款金额）。
+   */
+  private void upsertReceiptFromDocument(Document document) {
+    Batch batch = batchMapper.selectById(document.getBatchId());
+    if (batch == null) {
+      return;
+    }
+    BigDecimal amount = nz(document.getAmount());
+    LocalDate date = document.getDocDate() != null ? document.getDocDate() : LocalDate.now();
+    ProjectReceipt receipt = receiptMapper.selectOne(Wrappers.<ProjectReceipt>lambdaQuery()
+        .eq(ProjectReceipt::getSourceDocumentId, document.getId())
+        .last("limit 1"));
+    if (receipt == null) {
+      receipt = new ProjectReceipt();
+      receipt.setProjectId(batch.getProjectId());
+      receipt.setReceiptDate(date);
+      receipt.setAmount(amount);
+      receipt.setPayer(document.getSupplierName());
+      receipt.setRemark("智能助理收款单");
+      receipt.setSourceDocumentId(document.getId());
+      receiptMapper.insert(receipt);
+      ProjectReceiptAllocation allocation = new ProjectReceiptAllocation();
+      allocation.setReceiptId(receipt.getId());
+      allocation.setProjectId(batch.getProjectId());
+      allocation.setBatchId(batch.getId());
+      allocation.setAmount(amount);
+      allocation.setSortOrder(0);
+      allocationMapper.insert(allocation);
+      return;
+    }
+    BigDecimal delta = amount.subtract(nz(receipt.getAmount()));
+    receipt.setReceiptDate(date);
+    receipt.setAmount(amount);
+    if (StringUtils.hasText(document.getSupplierName())) {
+      receipt.setPayer(document.getSupplierName());
+    }
+    receipt.setUpdatedAt(LocalDateTime.now());
+    receiptMapper.updateById(receipt);
+    if (delta.signum() == 0) {
+      return;
+    }
+    List<ProjectReceiptAllocation> allocations = allocationMapper.selectList(
+        Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+            .eq(ProjectReceiptAllocation::getReceiptId, receipt.getId())
+            .orderByAsc(ProjectReceiptAllocation::getSortOrder));
+    if (allocations.isEmpty()) {
+      return;
+    }
+    // 差额从最后一个关联批次开始吸收，单个批次不扣成负数
+    for (int i = allocations.size() - 1; i >= 0 && delta.signum() != 0; i--) {
+      ProjectReceiptAllocation allocation = allocations.get(i);
+      BigDecimal next = nz(allocation.getAmount()).add(delta);
+      if (next.signum() < 0 && i > 0) {
+        delta = next;
+        next = BigDecimal.ZERO;
+      } else {
+        delta = BigDecimal.ZERO;
+      }
+      allocation.setAmount(next.max(BigDecimal.ZERO));
+      allocationMapper.updateById(allocation);
+    }
+    allocations.stream().map(ProjectReceiptAllocation::getBatchId).distinct()
+        .filter(id -> !id.equals(document.getBatchId()))
+        .forEach(this::refreshBatchAndProject);
+  }
+
+  /** 收款单删除：同步删除由它生成的项目收款及分摊，并刷新所有关联批次。 */
+  private void removeReceiptOfDocument(String documentId) {
+    List<ProjectReceipt> receipts = receiptMapper.selectList(Wrappers.<ProjectReceipt>lambdaQuery()
+        .eq(ProjectReceipt::getSourceDocumentId, documentId));
+    for (ProjectReceipt receipt : receipts) {
+      List<String> batchIds = allocationMapper.selectList(
+              Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+                  .eq(ProjectReceiptAllocation::getReceiptId, receipt.getId()))
+          .stream().map(ProjectReceiptAllocation::getBatchId).distinct().toList();
+      allocationMapper.delete(Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+          .eq(ProjectReceiptAllocation::getReceiptId, receipt.getId()));
+      receiptMapper.deleteById(receipt.getId());
+      batchIds.forEach(this::refreshBatchAndProject);
+    }
   }
 
   private List<LedgerRecord> getLedgerInternal(String batchId) {
@@ -1224,17 +1374,8 @@ public class LedgerService {
       LocalDate requiredDate = summary.getRequiredReceiptDate();
       List<MonthlySettlementCalculator.ReceiptEntry> receipts = new java.util.ArrayList<>();
       if (StringUtils.hasText(summary.getBatchId())) {
-        documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-                .eq(Document::getBatchId, summary.getBatchId())
-                .eq(Document::getDocType, "receipt")
-                .in(Document::getStatus, "matched", "archived")
-                .orderByAsc(Document::getDocDate))
-            .forEach(document -> {
-              if (document.getDocDate() != null) {
-                receipts.add(new MonthlySettlementCalculator.ReceiptEntry(
-                    document.getDocDate(), nz(document.getAmount())));
-              }
-            });
+        // 回款明细取项目收款在本批次上的分摊（2026-11-15 起收款可关联多批次）
+        receiptEntries(summary.getBatchId()).forEach(receipts::add);
       }
       MonthlySettlementCalculator.InterestResult result = MonthlySettlementCalculator.calculate(
           requiredDate, sales, received, receipts, today);
@@ -1253,6 +1394,25 @@ public class LedgerService {
               + outstanding.add(result.totalInterest()).toPlainString());
     }
     return records;
+  }
+
+  private List<MonthlySettlementCalculator.ReceiptEntry> receiptEntries(String batchId) {
+    List<ProjectReceiptAllocation> allocations = allocationMapper.selectList(
+        Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+            .eq(ProjectReceiptAllocation::getBatchId, batchId));
+    if (allocations == null || allocations.isEmpty()) {
+      return List.of();
+    }
+    Map<String, ProjectReceipt> receipts = receiptMapper.selectBatchIds(allocations.stream()
+            .map(ProjectReceiptAllocation::getReceiptId).distinct().toList())
+        .stream().collect(Collectors.toMap(ProjectReceipt::getId, r -> r));
+    return allocations.stream()
+        .filter(a -> receipts.containsKey(a.getReceiptId()))
+        .map(a -> new MonthlySettlementCalculator.ReceiptEntry(
+            receipts.get(a.getReceiptId()).getReceiptDate(), nz(a.getAmount())))
+        .filter(entry -> entry.date() != null)
+        .sorted(java.util.Comparator.comparing(MonthlySettlementCalculator.ReceiptEntry::date))
+        .toList();
   }
 
   private void requireOwnedBatch(String userId, String projectId, String batchId) {

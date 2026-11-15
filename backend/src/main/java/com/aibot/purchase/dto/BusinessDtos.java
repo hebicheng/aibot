@@ -75,7 +75,13 @@ public final class BusinessDtos {
       BigDecimal marginRate,
       String remark,
       Map<String, Object> businessHints,
-      Instant updatedAt
+      Instant updatedAt,
+      /** 是否已对账（人工勾选） */
+      Boolean reconciled,
+      /** 已收款 = Σ 项目收款在本批次上的分摊 */
+      BigDecimal receivedAmount,
+      /** 收款状态：未收款 / 部分收款 / 已收款 */
+      String receiptStatus
   ) {
   }
 
@@ -96,7 +102,9 @@ public final class BusinessDtos {
       LocalDate businessDate,
       String materialSummary,
       /** 批次级业务默认口径（按单据类型 scope 分组）；null=不修改，空 map=清空 */
-      Map<String, Object> businessHints
+      Map<String, Object> businessHints,
+      /** 是否已对账；null=不修改 */
+      Boolean reconciled
   ) {
   }
 
@@ -307,5 +315,93 @@ public final class BusinessDtos {
   }
 
   public record SupplierSummaryDto(String name, BigDecimal amount, Integer onTimeRate, Integer times) {
+  }
+
+  // ---------------------------------------------------------------------------
+  // 项目收款（2026-11-15）：一笔收款可关联同项目下多个批次
+  // ---------------------------------------------------------------------------
+
+  /** 收款关联的某个批次；amount 为空表示由系统按销售顺序自动分摊。 */
+  public record ReceiptAllocationInput(
+      @NotBlank String batchId,
+      BigDecimal amount
+  ) {
+  }
+
+  public record ReceiptSaveRequest(
+      @NotNull LocalDate receiptDate,
+      @NotNull @PositiveOrZero BigDecimal amount,
+      String payer,
+      String remark,
+      @NotNull List<ReceiptAllocationInput> allocations
+  ) {
+  }
+
+  public record ReceiptAllocationDto(
+      String batchId,
+      String batchName,
+      String material,
+      BigDecimal amount
+  ) {
+  }
+
+  public record ReceiptDto(
+      String id,
+      LocalDate receiptDate,
+      BigDecimal amount,
+      String payer,
+      String remark,
+      /** 来源：manual=手动登记 / document=智能助理收款单 */
+      String source,
+      List<ReceiptAllocationDto> allocations
+  ) {
+  }
+
+  /** 收款视角下的批次（按销售顺序排列）。 */
+  public record ReceiptBatchDto(
+      String batchId,
+      String batchName,
+      LocalDate businessDate,
+      String material,
+      BigDecimal salesAmount,
+      BigDecimal receivedAmount,
+      /** 未收 = 销售金额 − 已收（下限 0） */
+      BigDecimal remainingAmount,
+      String receiptStatus,
+      Boolean reconciled
+  ) {
+  }
+
+  public record MaterialReceiptSummaryDto(
+      String material,
+      BigDecimal salesAmount,
+      BigDecimal receivedAmount,
+      /** 应收差额 = 销售金额 − 收款金额（可为负：多收） */
+      BigDecimal differenceAmount,
+      Integer batchCount
+  ) {
+  }
+
+  public record ProjectReceiptOverviewDto(
+      String projectId,
+      /** 应收 = 所有批次销售金额合计 */
+      BigDecimal salesAmount,
+      /** 收款金额合计 */
+      BigDecimal receivedAmount,
+      /** 应收差额 = 应收 − 收款（可为负：多收） */
+      BigDecimal differenceAmount,
+      List<ReceiptDto> receipts,
+      List<ReceiptBatchDto> batches,
+      List<MaterialReceiptSummaryDto> materials
+  ) {
+  }
+
+  /** 自动分摊建议：给定金额，按销售顺序勾选批次并预分配。 */
+  public record ReceiptSuggestionDto(
+      BigDecimal amount,
+      List<ReceiptAllocationDto> allocations,
+      /** 选中批次全部收齐后仍多出来的钱（> 0 时提示多收） */
+      BigDecimal unallocatedAmount
+  ) {
   }
 }

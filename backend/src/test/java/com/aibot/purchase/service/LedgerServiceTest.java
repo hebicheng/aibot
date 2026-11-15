@@ -44,6 +44,8 @@ class LedgerServiceTest {
   @Mock private BatchHintService batchHintService;
   @Mock private com.aibot.purchase.service.market.PurchaseSalePriceService salePriceService;
   @Mock private FreightService freightService;
+  @Mock private com.aibot.purchase.mapper.ProjectReceiptMapper receiptMapper;
+  @Mock private com.aibot.purchase.mapper.ProjectReceiptAllocationMapper allocationMapper;
 
   private LedgerService service;
 
@@ -59,7 +61,9 @@ class LedgerServiceTest {
         new ObjectMapper(),
         batchHintService,
         salePriceService,
-        freightService
+        freightService,
+        receiptMapper,
+        allocationMapper
     );
     // 运费行由 FreightService 维护：单测里默认没有运费
     lenient().when(freightService.sum(anyString(), anyString())).thenReturn(BigDecimal.ZERO);

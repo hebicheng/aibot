@@ -61,9 +61,13 @@ class ReconciliationExportServiceTest {
     receipt.setDocType("receipt");
     when(documentMapper.selectList(any()))
         .thenReturn(List.of(d1, d2))
-        .thenReturn(List.of(d1, d2))
-        .thenReturn(List.of(receipt))
-        .thenReturn(List.of(receipt));
+        .thenReturn(List.of(d1, d2));
+    // 回款改取项目收款表（2026-11-15）：范围内 / 累计各返回一笔 500
+    com.aibot.purchase.mapper.ProjectReceiptMapper receiptMapper =
+        mock(com.aibot.purchase.mapper.ProjectReceiptMapper.class);
+    com.aibot.purchase.entity.ProjectReceipt projectReceipt = new com.aibot.purchase.entity.ProjectReceipt();
+    projectReceipt.setAmount(new BigDecimal("500"));
+    when(receiptMapper.selectList(any())).thenReturn(List.of(projectReceipt));
 
     DocumentItem i1 = item("i1", "d1", "螺纹钢", "HRB400E Φ18",
         "20.16", "3037", "3067", "61681");
@@ -86,7 +90,7 @@ class ReconciliationExportServiceTest {
 
     ReconciliationExportService service = new ReconciliationExportService(
         businessQueryService, documentMapper, documentItemMapper,
-        itemNetMappingMapper, projectMapper, fileStorage);
+        itemNetMappingMapper, projectMapper, fileStorage, receiptMapper);
 
     byte[] content = service.export("u1", "p1",
         LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10));

@@ -8,6 +8,8 @@ import com.aibot.purchase.mapper.DocumentItemMapper;
 import com.aibot.purchase.mapper.DocumentItemMarketMappingMapper;
 import com.aibot.purchase.mapper.DocumentMapper;
 import com.aibot.purchase.mapper.ProjectMapper;
+import com.aibot.purchase.mapper.ProjectReceiptMapper;
+import com.aibot.purchase.entity.ProjectReceipt;
 import com.aibot.purchase.service.storage.FileStorage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import java.io.ByteArrayOutputStream;
@@ -66,6 +68,7 @@ public class ReconciliationExportService {
   private final DocumentItemMarketMappingMapper itemNetMappingMapper;
   private final ProjectMapper projectMapper;
   private final FileStorage fileStorage;
+  private final ProjectReceiptMapper receiptMapper;
 
   public ReconciliationExportService(
       BusinessQueryService businessQueryService,
@@ -73,8 +76,10 @@ public class ReconciliationExportService {
       DocumentItemMapper documentItemMapper,
       DocumentItemMarketMappingMapper itemNetMappingMapper,
       ProjectMapper projectMapper,
-      FileStorage fileStorage
+      FileStorage fileStorage,
+      ProjectReceiptMapper receiptMapper
   ) {
+    this.receiptMapper = receiptMapper;
     this.businessQueryService = businessQueryService;
     this.documentMapper = documentMapper;
     this.documentItemMapper = documentItemMapper;
@@ -99,8 +104,8 @@ public class ReconciliationExportService {
     Project project = loadOwnedProject(userId, projectId);
     List<Document> deliveriesInRange = listDeliveries(projectId, start, end);
     List<Document> deliveriesCumulative = listDeliveries(projectId, null, end);
-    List<Document> receiptsInRange = listReceipts(projectId, start, end);
-    List<Document> receiptsCumulative = listReceipts(projectId, null, end);
+    BigDecimal receiptsInRange = sumReceipts(projectId, start, end);
+    BigDecimal receiptsCumulative = sumReceipts(projectId, null, end);
 
     try (InputStream in = new ClassPathResource("对账单-模板.xlsx").getInputStream();
          Workbook workbook = WorkbookFactory.create(in);
@@ -118,7 +123,7 @@ public class ReconciliationExportService {
       writeSummary(sheet, offset,
           sumQuantity(detailRows), sumAmount(detailRows),
           cumulativeQuantity(deliveriesCumulative), cumulativeAmount(deliveriesCumulative),
-          sumDocAmount(receiptsInRange), sumDocAmount(receiptsCumulative));
+          receiptsInRange, receiptsCumulative);
       workbook.write(out);
       return out.toByteArray();
     } catch (Exception ex) {
@@ -199,14 +204,19 @@ public class ReconciliationExportService {
             .orderByAsc(Document::getCreatedAt));
   }
 
-  private List<Document> listReceipts(String projectId, LocalDate start, LocalDate end) {
-    return documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getProjectId, projectId)
-            .eq(Document::getDocType, "receipt")
-            .eq(Document::getStatus, "matched")
-            .notExists(EXCLUDE_DELETED_BATCH)
-            .le(end != null, Document::getDocDate, end)
-            .ge(start != null, Document::getDocDate, start));
+  /**
+   * 回款合计取项目收款表（2026-11-15 起收款可关联多批次、可手动登记），
+   * 智能助理收款单确认时也会同步生成收款记录，因此不再单独统计收款单据。
+   */
+  private BigDecimal sumReceipts(String projectId, LocalDate start, LocalDate end) {
+    return receiptMapper.selectList(Wrappers.<ProjectReceipt>lambdaQuery()
+            .eq(ProjectReceipt::getProjectId, projectId)
+            .le(end != null, ProjectReceipt::getReceiptDate, end)
+            .ge(start != null, ProjectReceipt::getReceiptDate, start))
+        .stream()
+        .map(ProjectReceipt::getAmount)
+        .map(ReconciliationExportService::nz)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
   private List<DetailRow> loadDetailRows(List<Document> deliveries) {
