@@ -570,6 +570,22 @@ public class DocumentService {
     return doc;
   }
 
+  /** 收款管理的修改复用单据编辑路径，同步业务金额、指纹和聊天卡片；原始附件不变。 */
+  @Transactional
+  public void syncReceiptFromManagement(String userId, String projectId, String documentId,
+      BigDecimal amount, LocalDate receiptDate, String payer) {
+    Document source = requireOwnDocument(userId, documentId);
+    if (!projectId.equals(source.getProjectId()) || !"receipt".equals(source.getDocType())
+        || !List.of("matched", "archived").contains(source.getStatus())) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "来源不是本项目的已确认收款单，无法同步修改");
+    }
+    Map<String, Object> edits = new LinkedHashMap<>();
+    edits.put("amount", amount);
+    edits.put("docDate", receiptDate);
+    edits.put("supplierName", payer);
+    editDocument(userId, documentId, edits);
+  }
+
   /**
    * 编辑单据（人工修正 AI 识别结果）
    */
@@ -602,6 +618,13 @@ public class DocumentService {
     mergeFinancialFields(doc, edits);
     mergeDeliveryNoteFields(doc, edits);
     mergeReviewFields(doc, edits);
+    if ("receipt".equals(doc.getDocType())) {
+      Map<String, Object> receiptFields = new LinkedHashMap<>(structuredData(doc));
+      receiptFields.put("amount", doc.getAmount());
+      receiptFields.put("docDate", doc.getDocDate() == null ? null : doc.getDocDate().toString());
+      receiptFields.put("supplierName", doc.getSupplierName());
+      doc.setStructuredData(toJson(receiptFields));
+    }
     // 待澄清资料补字段后即可转为待确认，无需再走一次追问
     if ("needs_clarification".equals(doc.getStatus())) {
       doc.setStatus("pending");
@@ -619,6 +642,12 @@ public class DocumentService {
     resolveAutomaticTarget(doc);
     doc.setBusinessFingerprint(businessFingerprint(doc));
     documentMapper.updateById(doc);
+    if ("receipt".equals(doc.getDocType()) && edits.containsKey("supplierName")) {
+      // updateById 默认跳过 null；清空付款单位也必须同步到数据库。
+      documentMapper.update(null, Wrappers.<Document>lambdaUpdate()
+          .eq(Document::getId, documentId)
+          .set(Document::getSupplierName, doc.getSupplierName()));
+    }
     if (confirmed) {
       validateForConfirmation(doc);
       if ("supply_order".equals(doc.getDocType())) {

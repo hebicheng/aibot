@@ -1,5 +1,6 @@
 package com.aibot.purchase.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -35,7 +36,7 @@ public final class BusinessDtos {
       BigDecimal salesInvoiceAmount,
       /** 总收款：台账行 receipt 单据累计回款 */
       BigDecimal receivedAmount,
-      /** 应收款 = 销售合同总额 − 总收款（下限 0，与台账 outstanding 一致） */
+      /** 剩余应收 = 销售合同总额 − 总收款（下限 0，与台账 outstanding 一致） */
       BigDecimal outstanding,
       /** 未开票 = 销售合同总额 − 总开票，可能为负（预开票） */
       BigDecimal uninvoicedSales,
@@ -46,6 +47,11 @@ public final class BusinessDtos {
       Instant updatedAt,
       Integer batchCount
   ) {
+    /** 应收差额保留多收产生的负值，与剩余应收 outstanding 区分。 */
+    @JsonProperty("differenceAmount")
+    public BigDecimal differenceAmount() {
+      return salesAmount.subtract(receivedAmount);
+    }
   }
 
   public record ProjectCreateRequest(

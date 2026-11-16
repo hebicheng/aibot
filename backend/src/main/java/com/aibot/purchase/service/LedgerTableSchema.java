@@ -106,7 +106,7 @@ public final class LedgerTableSchema {
           HeaderCell.of("开票金额", 1, 1, "head-sales-leaf"),
           HeaderCell.of("税率", 1, 1, "head-sales-leaf"),
           HeaderCell.of("已收款金额", 1, 1, "head-sales-leaf"),
-          HeaderCell.of("未回款金额", 1, 1, "head-sales-leaf")
+          HeaderCell.of("剩余应收金额", 1, 1, "head-sales-leaf")
       )
   );
 

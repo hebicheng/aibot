@@ -31,6 +31,7 @@ import com.aibot.purchase.entity.Material;
 import com.aibot.purchase.entity.MaterialMarketMapping;
 import com.aibot.purchase.entity.OperationLog;
 import com.aibot.purchase.entity.Project;
+import com.aibot.purchase.entity.ProjectReceipt;
 import com.aibot.purchase.entity.ProjectReceiptAllocation;
 import com.aibot.purchase.entity.Supplier;
 import com.aibot.purchase.entity.SupplierQuote;
@@ -44,6 +45,7 @@ import com.aibot.purchase.mapper.MaterialMarketMappingMapper;
 import com.aibot.purchase.mapper.OperationLogMapper;
 import com.aibot.purchase.mapper.ProjectMapper;
 import com.aibot.purchase.mapper.ProjectReceiptAllocationMapper;
+import com.aibot.purchase.mapper.ProjectReceiptMapper;
 import com.aibot.purchase.mapper.SupplierMapper;
 import com.aibot.purchase.mapper.SupplierQuoteMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -83,6 +85,7 @@ public class BusinessQueryService {
   private final com.aibot.purchase.service.market.DeliveryNetPriceService deliveryNetPriceService;
 
   private final ProjectReceiptAllocationMapper allocationMapper;
+  private final ProjectReceiptMapper receiptMapper;
 
   public BusinessQueryService(
       ProjectMapper projectMapper,
@@ -100,9 +103,11 @@ public class BusinessQueryService {
       com.fasterxml.jackson.databind.ObjectMapper objectMapper,
       @org.springframework.context.annotation.Lazy
       com.aibot.purchase.service.market.DeliveryNetPriceService deliveryNetPriceService,
-      ProjectReceiptAllocationMapper allocationMapper
+      ProjectReceiptAllocationMapper allocationMapper,
+      ProjectReceiptMapper receiptMapper
   ) {
     this.allocationMapper = allocationMapper;
+    this.receiptMapper = receiptMapper;
     this.projectMapper = projectMapper;
     this.batchMapper = batchMapper;
     this.materialMapper = materialMapper;
@@ -261,6 +266,14 @@ public class BusinessQueryService {
   @Transactional
   public void deleteProject(String ownerId, String projectId) {
     getProject(ownerId, projectId);
+    if (allocationMapper.exists(Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+        .eq(ProjectReceiptAllocation::getProjectId, projectId))
+        || receiptMapper.exists(Wrappers.<ProjectReceipt>lambdaQuery()
+            .and(wrapper -> wrapper.eq(ProjectReceipt::getProjectId, projectId)
+                .or().apply("source_document_id IN (SELECT id FROM documents WHERE project_id = {0})", projectId)))) {
+      throw new ApiException(HttpStatus.BAD_REQUEST,
+          "项目存在收款关联，请先在收款管理删除对应收款记录；来自单据的收款请到数据中心删除源收款单，再删除项目");
+    }
     batchMapper.delete(Wrappers.<Batch>lambdaQuery().eq(Batch::getProjectId, projectId));
     projectMapper.deleteById(projectId);
     addLog(ownerId, projectId, null, "删除项目", "删除项目及其下全部批次");
@@ -272,6 +285,17 @@ public class BusinessQueryService {
   @Transactional
   public void deleteBatch(String ownerId, String batchId) {
     BatchDto batch = getBatch(ownerId, batchId);
+    if (allocationMapper.exists(Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+        .eq(ProjectReceiptAllocation::getBatchId, batchId))) {
+      throw new ApiException(HttpStatus.BAD_REQUEST,
+          "批次存在收款关联，请先在收款管理解除关联或删除对应收款记录后再删除批次");
+    }
+    // 分摊已改到其他批次时，仍须保留源收款单所在批次的访问入口。
+    if (receiptMapper.exists(Wrappers.<ProjectReceipt>lambdaQuery()
+        .apply("source_document_id IN (SELECT id FROM documents WHERE batch_id = {0})", batchId))) {
+      throw new ApiException(HttpStatus.BAD_REQUEST,
+          "批次包含源收款单，请到数据中心删除源收款单（对应收款记录会从收款管理同步移除）；仅解除分摊关联不能删除源收款单所在批次");
+    }
     batchMapper.deleteById(batchId);
     aggregationService.recomputeProject(batch.projectId());
     addLog(ownerId, batch.projectId(), batchId, "删除批次", "删除批次：" + batch.name());

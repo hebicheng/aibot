@@ -28,8 +28,10 @@ export type ApiProject = {
   salesInvoiceAmount: number;
   /** 总收款 */
   receivedAmount: number;
-  /** 应收款 = 销售合同总额 − 总收款 */
+  /** 剩余应收 = max(销售合同总额 − 总收款, 0) */
   outstanding: number;
+  /** 应收差额 = 销售合同总额 − 总收款，可为负（多收） */
+  differenceAmount: number;
   /** 未开票 = 销售合同总额 − 总开票 */
   uninvoicedSales: number;
   profitAmount: number;

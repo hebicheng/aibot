@@ -270,6 +270,7 @@ const mapProjects = (apiProjects: ApiProject[], apiBatches: ApiBatch[]): Project
       salesInvoiced: Number(project.salesInvoiceAmount || 0),
       received: Number(project.receivedAmount || 0),
       receivable: Number(project.outstanding || 0),
+      differenceAmount: Number(project.differenceAmount || 0),
       uninvoicedSales: Number(project.uninvoicedSales || 0),
       profit: Number(project.profitAmount || 0),
       marginRate: Number(project.marginRate || 0),
@@ -1816,9 +1817,15 @@ function ProjectsPage({
                   hint="客户回款累计"
                 />
                 <Metric
-                  label="应收款"
+                  label="应收差额"
+                  value={money(selectedProject.differenceAmount)}
+                  hint="合同总额 − 总收款，负值表示多收"
+                  tone={selectedProject.differenceAmount < 0 ? 'danger' : ''}
+                />
+                <Metric
+                  label="剩余应收"
                   value={money(selectedProject.receivable)}
-                  hint="合同总额 − 总收款"
+                  hint="应收差额下限为 0，与台账一致"
                 />
                 <Metric
                   label="未开票"
@@ -1949,7 +1956,7 @@ function ProjectsPage({
           </Panel>
           <ReceiptPanel
             projectId={selectedProject.id}
-            refreshKey={selectedProject.batches.map((b) => `${b.id}:${b.sales}`).join('|')}
+            refreshKey={selectedProject.batches.map((b) => `${b.id}:${b.sales}:${b.received}`).join('|')}
             onChanged={onReceiptsChanged}
             onToast={onToast}
           />
@@ -3203,7 +3210,7 @@ function LedgerPage({
       '销售单号',
       '销售金额',
       '已收款',
-      '未回款',
+      '剩余应收',
       '状态'
     ];
     const rows = ledgerRows.map((row) => [
@@ -3264,7 +3271,7 @@ function LedgerPage({
         <Metric label="已付款" value={money(totalPaid)} />
         <Metric label="未付款" value={money(totalUnpaid)} tone="danger" />
         <Metric label="进项票金额" value={money(totalInvoice)} tone="success" />
-        {view === 'sales' && <Metric label="未回款金额" value={money(totalOutstanding)} tone="danger" />}
+        {view === 'sales' && <Metric label="剩余应收金额" value={money(totalOutstanding)} tone="danger" />}
       </div>
 
       <Panel className="ledger-panel">
@@ -3322,7 +3329,7 @@ function LedgerPage({
                     <th>销售单号</th>
                     <th>销售金额</th>
                     <th>已收款</th>
-                    <th>未回款</th>
+                    <th>剩余应收</th>
                     <th>收款进度</th>
                   </>
                 )}
@@ -3407,7 +3414,7 @@ function LedgerPage({
         </div>
         <div className="ledger-note">
           <AlertCircle size={16} />
-          红色金额表示未回款或存在差异。每一行均可追溯到原始单据、大模型识别结果和人工修改记录。
+          红色金额表示剩余应收或存在差异。每一行均可追溯到原始单据、大模型识别结果和人工修改记录。
         </div>
       </Panel>
     </div>

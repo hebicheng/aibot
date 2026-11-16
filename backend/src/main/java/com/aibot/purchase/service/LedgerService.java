@@ -939,6 +939,9 @@ public class LedgerService {
       return;
     }
     BigDecimal amount = nz(document.getAmount());
+    if (amount.signum() <= 0) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "收款金额必须大于 0");
+    }
     LocalDate date = document.getDocDate() != null ? document.getDocDate() : LocalDate.now();
     ProjectReceipt receipt = receiptMapper.selectOne(Wrappers.<ProjectReceipt>lambdaQuery()
         .eq(ProjectReceipt::getSourceDocumentId, document.getId())
@@ -964,11 +967,11 @@ public class LedgerService {
     BigDecimal delta = amount.subtract(nz(receipt.getAmount()));
     receipt.setReceiptDate(date);
     receipt.setAmount(amount);
-    if (StringUtils.hasText(document.getSupplierName())) {
-      receipt.setPayer(document.getSupplierName());
-    }
+    receipt.setPayer(document.getSupplierName());
     receipt.setUpdatedAt(LocalDateTime.now());
-    receiptMapper.updateById(receipt);
+    receiptMapper.update(receipt, Wrappers.<ProjectReceipt>lambdaUpdate()
+        .eq(ProjectReceipt::getId, receipt.getId())
+        .set(ProjectReceipt::getPayer, receipt.getPayer()));
     if (delta.signum() == 0) {
       return;
     }

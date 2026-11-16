@@ -955,7 +955,7 @@ export function ReconciliationLedgerPage({
         <div className="metric success"><span>进项票金额</span><strong>{money(totalInvoice)}</strong></div>
         <div className="metric"><span>销售总金额</span><strong>{money(totalSales)}</strong></div>
         <div className="metric success"><span>已收款</span><strong>{money(totalReceived)}</strong></div>
-        <div className="metric danger"><span>未回款</span><strong>{money(totalOutstanding)}</strong></div>
+        <div className="metric danger"><span>剩余应收</span><strong>{money(totalOutstanding)}</strong></div>
         <div className="metric success"><span>毛利</span><strong>{money(totalGrossProfit)}</strong></div>
       </div>
 
@@ -1240,7 +1240,7 @@ export function ReconciliationLedgerPage({
                           </td>
                           <td rowSpan={renderRowCount} className="merged-receipt-cell">
                             {group.isMonthlySettlement && group.interest != null && group.interest > 0 ? (
-                              <span className="ledger-due-cell" title={`未回款加利息合计 = ${money(group.outstanding)} + ${money(group.interest)}（月结利息）`}>
+                              <span className="ledger-due-cell" title={`剩余应收加利息合计 = ${money(group.outstanding)} + ${money(group.interest)}（月结利息）`}>
                                 <LedgerMoney value={group.outstanding} tone={group.outstanding > 0 ? 'amount-pending' : ''} />
                                 <small className="ledger-due-breakdown">含息 {money(group.outstanding + group.interest)}</small>
                               </span>
@@ -1367,7 +1367,7 @@ export function ReconciliationLedgerPage({
             <div className="ledger-detail-head">
               <div>
                 <strong>月结加价利息明细</strong>
-                <small>{interestDetailGroup.batch} · 销售 {money(interestDetailGroup.sales)} · 未回款 {money(interestDetailGroup.outstanding)}</small>
+                <small>{interestDetailGroup.batch} · 销售 {money(interestDetailGroup.sales)} · 剩余应收 {money(interestDetailGroup.outstanding)}</small>
               </div>
               <button type="button" onClick={() => setInterestDetailGroup(null)}><X size={14} /></button>
             </div>
@@ -1376,7 +1376,7 @@ export function ReconciliationLedgerPage({
                 {interestDetailGroup.interestDetails.map((detail, index) => (
                   <div className="ledger-detail-row" key={index}>
                     <span className="ledger-detail-row-note">
-                      {detail.type === 'receipt' ? '回款' : '未回款'}
+                      {detail.type === 'receipt' ? '回款' : '剩余应收'}
                       {detail.date ? `（${detail.date}）` : ''}
                     </span>
                     <span className="ledger-detail-row-meta">
@@ -1388,17 +1388,17 @@ export function ReconciliationLedgerPage({
                 ))}
               </div>
             ) : (
-              <div className="ledger-detail-empty">当前无计息（可能在 7 天宽限期内或无未回款本金）</div>
+              <div className="ledger-detail-empty">当前无计息（可能在 7 天宽限期内或无剩余应收本金）</div>
             )}
             <div className="ledger-detail-total">
-              <span>未回款含息合计 = 未回款 + 利息</span>
+              <span>剩余应收含息合计 = 剩余应收 + 利息</span>
               <strong>{money(interestDetailGroup.outstanding)} + {money(interestDetailGroup.interest || 0)} = {money(interestDetailGroup.outstanding + (interestDetailGroup.interest || 0))}</strong>
             </div>
             {(interestDetailGroup.overdueFlag || interestDetailGroup.amountCapFlag) && (
               <div className="ledger-detail-warn">
                 {interestDetailGroup.overdueFlag ? '欠款超 3 个月' : ''}
                 {interestDetailGroup.overdueFlag && interestDetailGroup.amountCapFlag ? ' · ' : ''}
-                {interestDetailGroup.amountCapFlag ? '未回款超 300 万' : ''}
+                {interestDetailGroup.amountCapFlag ? '剩余应收超 300 万' : ''}
               </div>
             )}
           </div>

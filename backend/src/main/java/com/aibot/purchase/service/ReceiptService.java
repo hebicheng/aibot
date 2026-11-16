@@ -63,6 +63,7 @@ public class ReceiptService {
   private final ProjectReceiptAllocationMapper allocationMapper;
   private final LedgerService ledgerService;
   private final BusinessQueryService businessQueryService;
+  private final DocumentService documentService;
 
   public ReceiptService(
       ProjectMapper projectMapper,
@@ -70,7 +71,8 @@ public class ReceiptService {
       ProjectReceiptMapper receiptMapper,
       ProjectReceiptAllocationMapper allocationMapper,
       LedgerService ledgerService,
-      BusinessQueryService businessQueryService
+      BusinessQueryService businessQueryService,
+      DocumentService documentService
   ) {
     this.projectMapper = projectMapper;
     this.batchMapper = batchMapper;
@@ -78,6 +80,7 @@ public class ReceiptService {
     this.allocationMapper = allocationMapper;
     this.ledgerService = ledgerService;
     this.businessQueryService = businessQueryService;
+    this.documentService = documentService;
   }
 
   // ---------------------------------------------------------------------------
@@ -183,10 +186,18 @@ public class ReceiptService {
         .map(ProjectReceiptAllocation::getBatchId).toList());
     fill(receipt, request);
     receipt.setUpdatedAt(LocalDateTime.now());
-    receiptMapper.updateById(receipt);
+    receiptMapper.update(receipt, Wrappers.<ProjectReceipt>lambdaUpdate()
+        .eq(ProjectReceipt::getId, receiptId)
+        .set(ProjectReceipt::getPayer, receipt.getPayer())
+        .set(ProjectReceipt::getRemark, receipt.getRemark()));
     allocationMapper.delete(Wrappers.<ProjectReceiptAllocation>lambdaQuery()
         .eq(ProjectReceiptAllocation::getReceiptId, receiptId));
     touched.addAll(writeAllocations(receipt, request, receiptId));
+    // 先存收款和本次分摊，再同步来源单据：单据回写时 delta=0，不会重分或重复累加。
+    if (StringUtils.hasText(receipt.getSourceDocumentId())) {
+      documentService.syncReceiptFromManagement(userId, projectId, receipt.getSourceDocumentId(),
+          receipt.getAmount(), receipt.getReceiptDate(), receipt.getPayer());
+    }
     touched.forEach(ledgerService::refreshReceived);
     businessQueryService.addLog(userId, projectId, null, "修改收款",
         "修改收款为 " + receipt.getAmount().toPlainString() + " 元");
