@@ -455,11 +455,12 @@
 
       <!-- 对账单导出（日期范围，对齐 web 台账页「导出对账单」） -->
       <block wx:elif="{{overlay==='reconExport'}}">
-        <view class="identity-tip"><xicon name="bill" size="30" color="#3550d6" />按送货单日期取明细，累计供应量 / 供货金额 / 已支付按项目统计至结束日（含本次）。</view>
+        <view class="identity-tip"><xicon name="bill" size="30" color="#3550d6" />按送货单日期取明细；选择材料后只导出该材料的批次，累计与已支付同样只统计这些批次。</view>
         <view class="field-2col">
           <view class="field"><view class="field-label">开始日期</view><picker mode="date" value="{{reconExportForm.start}}" data-field="start" bindchange="updateReconExportDate"><view class="picker-value">{{reconExportForm.start}}</view></picker></view>
           <view class="field"><view class="field-label">结束日期</view><picker mode="date" value="{{reconExportForm.end}}" data-field="end" bindchange="updateReconExportDate"><view class="picker-value">{{reconExportForm.end}}</view></picker></view>
         </view>
+        <view class="field"><view class="field-label">材料</view><picker range="{{reconMaterialOptions}}" value="{{reconExportForm.materialIndex}}" bindchange="updateReconExportMaterial"><view class="picker-value">{{reconMaterialOptions[reconExportForm.materialIndex] || '全部材料'}}</view></picker></view>
         <view class="btn btn-primary sheet-btn sheet-btn-block {{busy ? 'is-disabled' : ''}}" bindtap="downloadReconciliationExport"><xicon name="download" size="30" color="#ffffff" />下载对账单</view>
       </block>
 

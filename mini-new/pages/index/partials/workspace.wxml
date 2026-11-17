@@ -296,6 +296,9 @@
                     <view class="recon-form-field"><text>结束日期</text><view>{{item.payload.reconEnd}}</view></view>
                   </picker>
                 </view>
+                <picker range="{{item.payload.reconMaterialOptions}}" value="{{item.payload.reconMaterialIndex}}" data-msg-id="{{item.id}}" bindtap="loadReconMaterials" bindchange="updateReconMaterial">
+                  <view class="recon-form-field recon-form-material"><text>材料</text><view>{{item.payload.reconMaterialOptions[item.payload.reconMaterialIndex] || '全部材料'}}</view></view>
+                </picker>
                 <view wx:if="{{item.payload.reconError}}" class="doc-missing">{{item.payload.reconError}}</view>
                 <view class="doc-actions">
                   <view

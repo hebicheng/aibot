@@ -120,12 +120,15 @@ module.exports = {
     method: 'POST',
     data: { documentId, answer }
   }),
-  // 对账单导出：实时汇总（按送货单日期范围）+ xlsx 下载
-  reconciliationSummary: (projectId, start, end) => request({
-    url: query('/api/reports/reconciliation/summary', { projectId, start, end })
+  // 对账单导出：实时汇总（按送货单日期范围）+ xlsx 下载；material 为空 = 全部材料
+  reconciliationMaterials: (projectId) => request({
+    url: query('/api/reports/reconciliation/materials', { projectId })
   }),
-  reconciliationExportUrl: (projectId, start, end) =>
-    query('/api/reports/reconciliation/export', { projectId, start, end }),
+  reconciliationSummary: (projectId, start, end, material) => request({
+    url: query('/api/reports/reconciliation/summary', { projectId, start, end, material })
+  }),
+  reconciliationExportUrl: (projectId, start, end, material) =>
+    query('/api/reports/reconciliation/export', { projectId, start, end, material }),
   documentAccessUrl: (documentId) => request({
     url: `/api/documents/${documentId}/access-url`
   }),

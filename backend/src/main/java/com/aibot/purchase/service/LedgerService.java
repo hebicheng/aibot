@@ -306,7 +306,7 @@ public class LedgerService {
   }
 
   /** 单张采购单的采购金额（尊重「保留差异」决策）；批次合计 = 逐张相加。 */
-  private BigDecimal supplyPurchase(Document supply) {
+  public BigDecimal supplyPurchase(Document supply) {
     BigDecimal itemTotal = getDocumentItems(supply.getId()).stream()
         .map(DocumentItem::getAmount)
         .map(LedgerService::nz)

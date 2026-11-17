@@ -108,6 +108,46 @@ export type ApiBatch = {
 
 export type ReceiptStatus = '未收款' | '部分收款' | '已收款';
 
+/** 公司往来：本公司与供货商的采购 / 进项发票汇总 */
+export type ApiCompanyTransactionOverview = {
+  purchaseAmount: number;
+  invoicedAmount: number;
+  uninvoicedAmount: number;
+  supplierCount: number;
+  invoiceCount: number;
+  pendingInvoiceCount: number;
+  supplyCount: number;
+  pendingSupplyCount: number;
+  suppliers: Array<{
+    supplierName: string;
+    purchaseAmount: number;
+    invoicedAmount: number;
+    uninvoicedAmount: number;
+    invoiceCount: number;
+  }>;
+  invoices: Array<{
+    id: string;
+    invoiceNo?: string | null;
+    supplierName: string;
+    invoiceDate?: string | null;
+    amount: number;
+    taxAmount?: number | null;
+    taxRate?: string | null;
+    status: string;
+    confirmed: boolean;
+    duplicatePending: boolean;
+    projectId?: string | null;
+    projectName?: string | null;
+    batchId?: string | null;
+    batchName?: string | null;
+    fileName?: string | null;
+    hasFile: boolean;
+    /** manual=公司往来页手动上传 / assistant=智能助理中识别 */
+    uploadSource: 'manual' | 'assistant';
+    remark?: string | null;
+  }>;
+};
+
 export type ApiReceiptAllocation = {
   batchId: string;
   batchName: string;
@@ -703,6 +743,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision })
     }),
+  // 公司往来：projectId 为空统计全部项目
+  companyTransactions: (projectId?: string) =>
+    request<ApiCompanyTransactionOverview>(
+      `/api/company-transactions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
   documentAccessUrl: (documentId: string) =>
     request<{ url: string; fileName: string; source: string }>(
       `/api/documents/${documentId}/access-url`
@@ -788,9 +832,11 @@ export const api = {
     return fileName;
   },
   // 对账单导出：模板渲染（送货单明细 + 项目累计 + 回款累计），按日期范围一个 sheet
-  async downloadReconciliation(projectId: string, start: string, end: string) {
+  // material 传入时只导出批次材料为该值的批次（如「螺纹钢」），不传导出全部
+  async downloadReconciliation(projectId: string, start: string, end: string, material?: string) {
     const token = localStorage.getItem('ai_bot_token');
     const params = new URLSearchParams({ projectId, start, end });
+    if (material) params.set('material', material);
     const response = await fetch(`${API_BASE}/api/reports/reconciliation/export?${params.toString()}`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...actAsHeader() }
     });
@@ -821,15 +867,19 @@ export const api = {
     });
   },
   // 对账单卡片实时汇总：项目/客户信息 + 指定日期范围的张数与锁定销售额（改日期即重取）
-  async getReconciliationSummary(projectId: string, start: string, end: string): Promise<{
+  async getReconciliationSummary(projectId: string, start: string, end: string, material?: string): Promise<{
     projectName?: string;
     customerName?: string;
     deliveries: number;
     salesAmount: number;
   }> {
     const params = new URLSearchParams({ projectId, start, end });
+    if (material) params.set('material', material);
     return request(`/api/reports/reconciliation/summary?${params.toString()}`);
   },
+  // 对账单可选材料：项目内各批次填写的材料（去重）
+  reconciliationMaterials: (projectId: string) =>
+    request<string[]>(`/api/reports/reconciliation/materials?projectId=${encodeURIComponent(projectId)}`),
   ledger: (projectId?: string, batchId?: string) => {
     const params = new URLSearchParams();
     if (projectId) params.set('projectId', projectId);

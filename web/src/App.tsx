@@ -78,6 +78,7 @@ import { summarizeBatchDelivery } from './deliveryMatching';
 import { MarketPage } from './MarketPage';
 import { ReconciliationLedgerPage } from './ReconciliationLedgerPage';
 import { ReceiptPanel, receiptTone } from './ReceiptPanel';
+import { CompanyTransactionsPage } from './CompanyTransactionsPage';
 import type {
   Batch,
   BusinessDocument,
@@ -387,6 +388,7 @@ const navItems: Array<{
   { key: 'projects', label: '项目与批次', description: '核心业务单位', icon: FolderKanban },
   { key: 'documents', label: '数据中心', description: '业务数据与原始资料', icon: FileSearch },
   { key: 'ledger', label: '对账台账', description: '票款货核对', icon: TableProperties },
+  { key: 'company', label: '公司往来', description: '供货商发票往来', icon: Building2 },
   { key: 'market', label: '市场行情', description: '价格对比与行情', icon: TrendingUp }
 ];
 
@@ -4394,11 +4396,11 @@ export default function App() {
   };
 
   // 对账单导出：模板渲染，按日期范围取送货单明细 + 项目累计
-  const exportReconciliation = async (start: string, end: string) => {
+  const exportReconciliation = async (start: string, end: string, material?: string) => {
     if (!currentProject) {
       throw new Error('请先选择项目');
     }
-    const fileName = await api.downloadReconciliation(currentProject.id, start, end);
+    const fileName = await api.downloadReconciliation(currentProject.id, start, end, material);
     showToast(`对账单已导出：${fileName}`);
   };
 
@@ -4521,6 +4523,16 @@ export default function App() {
               onUpdateBatch={updateLedgerBatch}
               onExportLedger={exportLedger}
               onExportReconciliation={exportReconciliation}
+            />
+          )}
+          {hasContext && page === 'company' && (
+            <CompanyTransactionsPage
+              companyName={profile?.companyName}
+              projects={projectsData}
+              currentProjectId={projectId}
+              currentBatchId={batchId}
+              onToast={showToast}
+              onChanged={reloadAfterReceipt}
             />
           )}
           {page === 'market' && (

@@ -1,4 +1,4 @@
-export type PageKey = 'workspace' | 'projects' | 'documents' | 'ledger' | 'market';
+export type PageKey = 'workspace' | 'projects' | 'documents' | 'ledger' | 'company' | 'market';
 export type DocumentStatus = '已匹配' | '待确认' | '识别中' | '有差异' | '重复归档';
 
 export interface Project {

@@ -713,7 +713,7 @@ export function ReconciliationLedgerPage({
     isMonthlySettlement?: boolean;
   }) => Promise<void>;
   onExportLedger: () => Promise<void>;
-  onExportReconciliation: (start: string, end: string) => Promise<void>;
+  onExportReconciliation: (start: string, end: string, material?: string) => Promise<void>;
 }) {
   // 对账台账以当前所在批次为准：只显示当前批次的行，不展示整个项目（BatchGroup.key = batchId）
   const groups = buildGroups(records, rows, projects)
@@ -736,6 +736,15 @@ export function ReconciliationLedgerPage({
       end: iso(now)
     };
   });
+  // 导出材料：按批次材料（新建批次时填写）筛选，空串 = 全部材料
+  const [reconMaterial, setReconMaterial] = useState('');
+  const currentProjectForRecon = projects.find((project) =>
+    project.batches.some((batch) => batch.id === currentBatchId));
+  const reconMaterialOptions = Array.from(new Set(
+    (currentProjectForRecon?.batches || [])
+      .map((batch) => (batch.material || '').trim())
+      .filter((material) => material && material !== '待补充')
+  ));
   const [interestDetailGroup, setInterestDetailGroup] = useState<BatchGroup | null>(null);
   // 运输费用行构成明细的展开状态（按批次，与材料行展开同交互）
   const [expandedTransports, setExpandedTransports] = useState<Set<string>>(new Set());
@@ -918,7 +927,7 @@ export function ReconciliationLedgerPage({
     }
     setReconExporting(true);
     try {
-      await onExportReconciliation(reconRange.start, reconRange.end);
+      await onExportReconciliation(reconRange.start, reconRange.end, reconMaterial || undefined);
       setReconOpen(false);
     } catch (error) {
       onToast(error instanceof Error ? error.message : '对账单导出失败，请稍后重试');
@@ -1667,7 +1676,7 @@ export function ReconciliationLedgerPage({
             <div className="ledger-detail-head">
               <div>
                 <strong>导出对账单</strong>
-                <small>按送货单日期取明细，累计供应量 / 供货金额 / 已支付按项目统计至结束日（含本次）</small>
+                <small>按送货单日期取明细；选择材料后只导出该材料的批次，累计与已支付同样只统计这些批次</small>
               </div>
               <button type="button" onClick={() => setReconOpen(false)}><X size={14} /></button>
             </div>
@@ -1687,6 +1696,15 @@ export function ReconciliationLedgerPage({
                   value={reconRange.end}
                   onChange={(event) => setReconRange({...reconRange, end: event.target.value})}
                 />
+              </label>
+              <label className="recon-export-material">
+                <span>材料</span>
+                <select value={reconMaterial} onChange={(event) => setReconMaterial(event.target.value)}>
+                  <option value="">全部材料</option>
+                  {reconMaterialOptions.map((material) => (
+                    <option key={material} value={material}>{material}</option>
+                  ))}
+                </select>
               </label>
             </div>
             {totalPendingCostRows > 0 && (

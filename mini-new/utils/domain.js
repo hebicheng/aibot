@@ -533,8 +533,12 @@ function decorateCardMessage(message) {
       reconStart: payload.start || payload.reconStart || localToday(),
       reconEnd: payload.end || payload.reconEnd || localToday(),
       reconSummaryText: payload.summary
-        ? `${payload.projectName || '当前项目'} · ${payload.customerName || '客户单位未设置'} · 送货单 ${payload.summary.deliveries} 张 · 锁定销售额 ${payload.summary.salesAmount != null ? money(number(payload.summary.salesAmount)) : '-'}`
+        ? `${payload.projectName || '当前项目'} · 全部材料 · 送货单 ${payload.summary.deliveries} 张 · 对账金额 ${payload.summary.salesAmount != null ? money(number(payload.summary.salesAmount)) : '-'}`
         : (payload.reconSummaryText || ''),
+      // 材料筛选：默认全部材料，选项在点开下拉时按项目批次材料拉取
+      reconMaterialOptions: payload.reconMaterialOptions || ['全部材料'],
+      reconMaterialIndex: payload.reconMaterialIndex || 0,
+      reconMaterial: payload.reconMaterial || '',
       focusTitle: isInvoiceUnknown
         ? '已确认这是一张发票'
         : isSettlementUnknown

@@ -11,6 +11,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -80,12 +81,19 @@ public class ReportController {
         .body(content);
   }
 
-  /** 对账单卡片实时汇总：项目/客户信息 + 指定日期范围的送货单张数与锁定销售额 */
+  /** 对账单可选材料：项目内各批次填写的材料（去重），导出时可按材料筛选批次 */
+  @GetMapping("/reconciliation/materials")
+  public ApiResponse<List<String>> reconciliationMaterials(@RequestParam String projectId) {
+    return ApiResponse.ok(reconciliationExportService.materialOptions(CurrentUser.get().id(), projectId));
+  }
+
+  /** 对账单卡片实时汇总：项目/客户信息 + 指定日期范围（可选材料）的送货单张数与对账金额 */
   @GetMapping("/reconciliation/summary")
   public ApiResponse<Map<String, Object>> reconciliationSummary(
       @RequestParam String projectId,
       @RequestParam String start,
-      @RequestParam String end
+      @RequestParam String end,
+      @RequestParam(required = false) String material
   ) {
     LocalDate startDate;
     LocalDate endDate;
@@ -96,18 +104,19 @@ public class ReportController {
       throw new IllegalArgumentException("日期格式不正确，应为 yyyy-MM-dd");
     }
     return ApiResponse.ok(reconciliationExportService.summaryView(
-        CurrentUser.get().id(), projectId, startDate, endDate));
+        CurrentUser.get().id(), projectId, startDate, endDate, material));
   }
 
   /**
-   * 对账单导出（销售侧，模板渲染）：日期范围内送货单明细 + 项目累计（≤ 范围结束日，含本次）+ 回款累计。
-   * 一次导出 = 一个日期范围一个 sheet。
+   * 对账单导出（销售侧，模板渲染）：日期范围内送货单明细 + 累计（≤ 范围结束日，含本次）+ 回款累计。
+   * material 传入时只导出批次材料为该值的批次（累计与回款同口径）；不传导出全部批次。
    */
   @GetMapping("/reconciliation/export")
   public ResponseEntity<byte[]> exportReconciliation(
       @RequestParam String projectId,
       @RequestParam String start,
-      @RequestParam String end
+      @RequestParam String end,
+      @RequestParam(required = false) String material
   ) {
     LocalDate startDate;
     LocalDate endDate;
@@ -121,8 +130,8 @@ public class ReportController {
       throw new IllegalArgumentException("开始日期不能晚于结束日期");
     }
     String userId = CurrentUser.get().id();
-    byte[] content = reconciliationExportService.export(userId, projectId, startDate, endDate);
-    String fileName = reconciliationExportService.fileName(userId, projectId, startDate, endDate);
+    byte[] content = reconciliationExportService.export(userId, projectId, startDate, endDate, material);
+    String fileName = reconciliationExportService.fileName(userId, projectId, startDate, endDate, material);
     String encoded;
     try {
       encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");

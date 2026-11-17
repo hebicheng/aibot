@@ -96,6 +96,9 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
   const [end, setEnd] = useState(defaultEnd);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
+  // 材料筛选：按批次材料导出（空串 = 全部材料），选项来自项目各批次填写的材料
+  const [material, setMaterial] = useState('');
+  const [materialOptions, setMaterialOptions] = useState<string[]>([]);
   const [summary, setSummary] = useState<{
     projectName?: string;
     customerName?: string;
@@ -114,12 +117,24 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
       ? '预约的对账单'
       : '对账单导出';
 
-  // 汇总实时刷新：日期范围或项目变化即重取（后端按送货单日期统计张数与锁定销售额）
+  useEffect(() => {
+    let cancelled = false;
+    api.reconciliationMaterials(card.projectId)
+      .then((options) => {
+        if (!cancelled) setMaterialOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [card.projectId]);
+
+  // 汇总实时刷新：日期范围、材料或项目变化即重取（后端按送货单日期统计张数与对账金额）
   useEffect(() => {
     if (!start || !end || start > end) return;
     let cancelled = false;
     setSummarizing(true);
-    api.getReconciliationSummary(card.projectId, start, end)
+    api.getReconciliationSummary(card.projectId, start, end, material || undefined)
       .then((data) => {
         if (!cancelled) setSummary(data);
       })
@@ -130,7 +145,7 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
     return () => {
       cancelled = true;
     };
-  }, [card.projectId, start, end]);
+  }, [card.projectId, start, end, material]);
 
   const download = async () => {
     if (start > end) {
@@ -140,7 +155,7 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
     setDownloading(true);
     setError('');
     try {
-      await api.downloadReconciliation(card.projectId, start, end);
+      await api.downloadReconciliation(card.projectId, start, end, material || undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : '对账单导出失败，请稍后重试');
     } finally {
@@ -158,7 +173,7 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
           <strong>{sourceLabel}</strong>
           <small>
             {summary
-              ? (summarizing ? '正在统计...' : `${summary.projectName || '当前项目'} · ${summary.customerName || '客户单位未设置'} · 送货单 ${summary.deliveries} 张 · 锁定销售额 ${money(summary.salesAmount)}`)
+              ? (summarizing ? '正在统计...' : `${summary.projectName || '当前项目'} · ${material || '全部材料'} · 送货单 ${summary.deliveries} 张 · 对账金额 ${money(summary.salesAmount)}`)
               : '按送货单日期取明细，累计数据自动统计至结束日'}
           </small>
         </span>
@@ -171,6 +186,15 @@ function ReconciliationExportCard({ card }: { card: ReconciliationExportCardPayl
         <label>
           <span>结束日期</span>
           <input type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
+        </label>
+        <label>
+          <span>材料</span>
+          <select value={material} onChange={(event) => setMaterial(event.target.value)}>
+            <option value="">全部材料</option>
+            {materialOptions.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
         </label>
         <button
           type="button"
