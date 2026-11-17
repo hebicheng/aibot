@@ -291,6 +291,19 @@ public class MaterialLayerService {
               material.getQuoteSpecName(), material.getOrigin(), quoteCache);
         }
       }
+      // 只有送货行、没有采购行的材料（「0 采购行 / N 送货行」）：
+      // 销价上面是按「单价 × 采购吨数」加权算的，采购吨数为 0 就永远加权不出价，
+      // 于是明明绑了行情、锁定价也在，却显示「待网价」。按两级兜底（2026-11-12）：
+      //   ① 送货单已锁定金额 → 金额 ÷ 送货吨数（反映实际成交，最贴近这行钱）；
+      //   ② 否则上浮口径直接用锁定网价 + 上浮（不需要采购价）。
+      if (salesPrice == null && deliveryAmount.signum() > 0 && deliveryTons.signum() > 0) {
+        salesPrice = deliveryAmount.divide(deliveryTons, 2, RoundingMode.HALF_UP);
+        salesPriceBasis = "lock";
+      } else if (salesPrice == null && policy != null && "uplift".equals(policy.mode())
+          && lockedNetPrice != null && lockedNetPrice.signum() > 0) {
+        salesPrice = policy.salesUnitPrice(lockedNetPrice);
+        salesPriceBasis = "uplift";
+      }
       rows.add(new MaterialRow(
           material.getId(),
           material.getCategory(),

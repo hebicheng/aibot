@@ -572,7 +572,8 @@ export function MarketPage({
                                   <small>
                                     {row.salesPriceBasis === 'manual' ? ' · 人工价'
                                       : row.salesPriceBasis === 'margin' ? ' · 毛利率'
-                                        : row.salesPriceBasis === 'uplift' ? ' · 上浮' : ''}
+                                        : row.salesPriceBasis === 'uplift' ? ' · 上浮'
+                                          : row.salesPriceBasis === 'lock' ? ' · 送货锁价' : ''}
                                   </small>
                                 </>
                               : <small className="amount-pending">

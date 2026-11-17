@@ -47,7 +47,7 @@ ai:
     # 不配置 key 时 QwenClient.isConfigured()=false，聊天自动走结构化兜底，不会导致启动失败
     api-key: ${QWEN_API_KEY:}
     base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
-    model: ${QWEN_MODEL:qwen3.8-max}
+    model: ${QWEN_MODEL:qwen3.8-flash}
     timeout-seconds: ${QWEN_TIMEOUT:120}
 
 # 计费 / 积分：换算公式 costCredits = total_tokens / 1000 × yuanPerThousandTokens × priceMultiplier × creditsPerYuan
