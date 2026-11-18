@@ -116,9 +116,12 @@ public class MarketController {
   // 材料清单（一个材料一个入口，2026-11-04）
   // ---------------------------------------------------------------------------
 
-  /** 材料级改价：把该材料取价日的绑定规格价钉成权威价，并按产品+规格刷新受影响批次。 */
+  /**
+   * 材料级改价（2026-11-12 重构）：写该材料自己的人工网价，只重锁本批次，<b>不改行情库</b>。
+   * price 传 null 表示清空人工网价、恢复按行情库取价。
+   */
   @PutMapping("/materials/{materialId}/quote-price")
-  public ApiResponse<com.aibot.purchase.service.market.MarketQuoteImportService.ImportOutcome> updateMaterialQuotePrice(
+  public ApiResponse<com.aibot.purchase.service.market.MaterialLayerService.ManualQuoteResult> updateMaterialQuotePrice(
       @PathVariable String materialId,
       @RequestBody QuotePriceUpdate request) {
     return ApiResponse.ok(materialLayerService.updateMaterialQuotePrice(materialId, request.price()));

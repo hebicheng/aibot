@@ -5231,6 +5231,18 @@ select:focus-visible {
   font-weight: inherit;
 }
 
+/* 采购金额括号里的计划值（2026-11-12）：实际值后面跟一行浅灰小字，仅在有差异时出现。
+   不换行到底部而是跟在数字后，避免每行多占一行高度（材料行本来就有多行）。 */
+.grouped-ledger-table small.ledger-plan-note {
+  display: block;
+  margin-top: 1px;
+  color: #9aa4b5;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
 .merged-receipt-cell {
   min-width: 110px;
   text-align: center;
@@ -5561,6 +5573,11 @@ select:focus-visible {
 
 .grouped-ledger-table thead .head-group-sales {
   background: #edf5f3;
+}
+
+/* 计划 / 实际差额分组（2026-11-12 新增）：与差额列叶子同一色系，浅一档 */
+.grouped-ledger-table thead .head-group-gap {
+  background: #f3f8f3;
 }
 
 .grouped-ledger-table thead .head-context,

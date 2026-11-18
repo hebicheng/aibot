@@ -320,23 +320,24 @@ export function MarketPage({
     }
   };
 
-  /** 材料级改价：把该材料取价日的绑定规格价钉成权威价（当前批次同步生效，其余批次后台刷新）。 */
+  /**
+   * 材料级改价（2026-11-12 重构）：只改这张材料自己的网价，只重锁本批次，不动行情库。
+   * 输入留空 = 清空人工网价，恢复按行情库取价。
+   */
   const confirmMaterialQuoteUpdate = async () => {
     if (!editMaterialQuote) return;
-    if (!(Number(editMaterialPrice) > 0)) {
-      notify('价格必须大于 0');
+    const text = editMaterialPrice.trim();
+    const manual = text === '' ? null : Number(text);
+    if (manual !== null && !(manual > 0)) {
+      notify('价格必须大于 0；留空表示清空人工网价');
       return;
     }
     setSavingMaterialPrice(true);
     try {
-      const outcome = await api.materialQuoteUpdate(editMaterialQuote.id, Number(editMaterialPrice));
-      if (outcome.refreshedBatches > 0) {
-        notify(outcome.backgroundBatches > 0
-          ? '改价已保存，当前批次已重算；其他批次正在后台刷新，完成后自动生效'
-          : '改价已保存，相关批次已按新价重算');
-      } else {
-        notify('改价已保存（没有批次用到这个规格，无需重算）');
-      }
+      const outcome = await api.materialQuoteUpdate(editMaterialQuote.id, manual);
+      notify(manual == null
+        ? '已清空人工网价，恢复按行情库取价并重算本批次'
+        : `改价已保存（只影响本材料）${outcome.relocked > 0 ? '，本批次已重算' : ''}`);
       setEditMaterialQuote(null);
       setEditMaterialPrice('');
       if (currentBatch) {
@@ -571,7 +572,8 @@ export function MarketPage({
                                   <small>
                                     {row.salesPriceBasis === 'manual' ? ' · 人工价'
                                       : row.salesPriceBasis === 'margin' ? ' · 毛利率'
-                                        : row.salesPriceBasis === 'uplift' ? ' · 上浮' : ''}
+                                        : row.salesPriceBasis === 'uplift' ? ' · 上浮'
+                                          : row.salesPriceBasis === 'lock' ? ' · 送货锁价' : ''}
                                   </small>
                                 </>
                               : <small className="amount-pending">
@@ -594,7 +596,12 @@ export function MarketPage({
                             </td>
                           <td className="market-price-cell">
                             {row.lockedNetPrice != null
-                              ? <>{money(row.lockedNetPrice, 0)}{row.quoteDate && <small> · {row.quoteDate}</small>}</>
+                              ? <>
+                                  {money(row.lockedNetPrice, 0)}
+                                  {row.manualQuotePrice != null
+                                    ? <small> · 人工网价</small>
+                                    : (row.quoteDate && <small> · {row.quoteDate}</small>)}
+                                </>
                               : (row.quoteSpecName
                                 ? <small>当日无此规格行情</small>
                                 : '—')}
@@ -604,7 +611,9 @@ export function MarketPage({
                               {row.quoteSpecName && (
                                 <button className="text-button" onClick={() => {
                                   setEditMaterialQuote(row);
-                                  setEditMaterialPrice(row.lockedNetPrice != null ? String(row.lockedNetPrice) : '');
+                                  // 只预填人工价：留空表示"没人工定价过"，避免误把行情价钉成人工价
+                                  setEditMaterialPrice(row.manualQuotePrice != null
+                                    ? String(row.manualQuotePrice) : '');
                                 }}>
                                   改价
                                 </button>
@@ -764,7 +773,7 @@ export function MarketPage({
         <div className="market-modal-backdrop" onClick={() => setEditMaterialQuote(null)}>
           <div className="market-modal" onClick={(e) => e.stopPropagation()}>
             <div className="market-modal-head">
-              <h3>材料改价</h3>
+              <h3>材料改价（本材料网价）</h3>
               <button onClick={() => setEditMaterialQuote(null)} aria-label="关闭">
                 <XCircle size={18} />
               </button>
@@ -776,18 +785,22 @@ export function MarketPage({
               )}
             </p>
             <div className="market-field">
-              <span>绑定规格价格（元/吨）</span>
+              <span>本材料网价（元/吨）</span>
               <input
                 type="number"
                 min="0"
                 step="any"
                 className="market-price-input"
+                placeholder={editMaterialQuote.lockedNetPrice != null
+                  ? `当前行情价 ${money(editMaterialQuote.lockedNetPrice, 0)}（留空=用行情价）`
+                  : '留空=按行情库取价'}
                 value={editMaterialPrice}
                 onChange={(event) => setEditMaterialPrice(event.target.value)}
               />
               <small className="market-field-hint">
-                把「{editMaterialQuote.quoteSpecName}」在取价日的价格钉为权威价（产地跟随本材料），
-                取价日解析到该日、绑定这个规格的批次自动按新价重锁重算；爬取数据不改动、人工绑定/人工销售价不动。
+                只改这一条材料的网价（优先级高于行情库，取价、销售价都按它算），
+                也只重算本批次——<b>不会写进行情库、不影响其它批次或共用同一规格的其它材料</b>。
+                留空保存 = 清空人工网价，恢复按行情价取价。要改「市场行情」请用行情 Tab 的改价。
               </small>
             </div>
             <div className="market-modal-actions">

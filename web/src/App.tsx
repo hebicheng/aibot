@@ -363,6 +363,12 @@ const mapLedger = (
       grossMargin: row.grossMargin == null ? undefined : Number(row.grossMargin),
       purchaseMarginAmount: row.purchaseMarginAmount == null ? undefined : Number(row.purchaseMarginAmount),
       purchaseMarginRate: row.purchaseMarginRate == null ? undefined : Number(row.purchaseMarginRate),
+      purchaseMarginPlanAmount: row.purchaseMarginPlanAmount == null
+        ? undefined
+        : Number(row.purchaseMarginPlanAmount),
+      purchaseMarginPlanRate: row.purchaseMarginPlanRate == null
+        ? undefined
+        : Number(row.purchaseMarginPlanRate),
       purchaseMarginNote: row.purchaseMarginNote ?? undefined,
       purchaseFreightCost: row.purchaseFreightCost == null ? undefined : Number(row.purchaseFreightCost),
       purchaseSalesFreight: row.purchaseSalesFreight == null
@@ -372,6 +378,25 @@ const mapLedger = (
         ? undefined
         : Number(row.deliveryCostPendingCount),
       purchaseMarginGap: row.purchaseMarginGap == null ? undefined : Number(row.purchaseMarginGap),
+      purchaseRevenueGap: row.purchaseRevenueGap == null ? undefined : Number(row.purchaseRevenueGap),
+      purchasePlanAmount: row.purchasePlanAmount == null ? undefined : Number(row.purchasePlanAmount),
+      purchaseAmountGap: row.purchaseAmountGap == null ? undefined : Number(row.purchaseAmountGap),
+      purchaseFreightPlan: row.purchaseFreightPlan == null ? undefined : Number(row.purchaseFreightPlan),
+      purchaseFreightGap: row.purchaseFreightGap == null ? undefined : Number(row.purchaseFreightGap),
+      purchaseHasDelivery: row.purchaseHasDelivery,
+      purchaseUnpricedDeliveryRows: row.purchaseUnpricedDeliveryRows == null
+        ? undefined
+        : Number(row.purchaseUnpricedDeliveryRows),
+      materialCostBasis: row.materialCostBasis?.map((entry) => ({
+        category: entry.category,
+        planTons: Number(entry.planTons || 0),
+        planAmount: Number(entry.planAmount || 0),
+        deliveredTons: Number(entry.deliveredTons || 0),
+        actualAmount: Number(entry.actualAmount || 0),
+        unitPrice: entry.unitPrice == null ? undefined : Number(entry.unitPrice),
+        fallbackPriced: entry.fallbackPriced,
+        unpriced: entry.unpriced
+      })),
       freightItems: row.freightItems,
       projectManager: row.projectManager,
       status

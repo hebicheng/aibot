@@ -80,11 +80,11 @@ public class PurchaseSalePriceService {
     if (items == null || items.isEmpty()) {
       return result;
     }
-    Map<String, BigDecimal> materialManuals = materialManualPrices(items);
+    Map<String, BatchMaterial> materials = materialOverrides(items);
     if (policy == null) {
       // 没有批次口径不产生自动销价，但材料级人工价是「人给定的」，不受口径约束
       for (DocumentItem item : items) {
-        BigDecimal manual = manualOf(item, materialManuals);
+        BigDecimal manual = manualOf(item, materials);
         result.put(item.getId(), manual == null ? EMPTY : new Price(null, manual, manual));
       }
       return result;
@@ -100,57 +100,80 @@ public class PurchaseSalePriceService {
       }
     }
     for (DocumentItem item : items) {
+      BatchMaterial material = materialOf(item, materials);
+      // 人工网价是取价最高一层（2026-11-12 补齐消费方）：没有锁定行情行时用它推销售价。
+      // 否则「设了人工网价」的批次 autoPrice 拿不到 netPrice → 上浮口径算不出价 → 估算货款为 0，
+      // 表现为台账「采购毛利差额 / 计划毛利」整列空白。
+      BigDecimal manualNetPrice = material == null ? null : material.getManualQuotePrice();
       result.put(item.getId(), priceOf(item, policy, mappingByItem.get(item.getId()),
-          manualOf(item, materialManuals)));
+          manualOf(item, material), manualNetPrice));
     }
     return result;
   }
 
-  /** 材料级人工销售价：一次批量载入，避免逐行查库（key=material_id，仅收正数）。 */
-  private Map<String, BigDecimal> materialManualPrices(List<DocumentItem> items) {
+  /** 材料行覆盖值：一次批量载入（人工销售价 + 人工网价），避免逐行查库。 */
+  private Map<String, BatchMaterial> materialOverrides(List<DocumentItem> items) {
     Set<String> materialIds = new LinkedHashSet<>();
     for (DocumentItem item : items) {
       if (item != null && StringUtils.hasText(item.getMaterialId())) {
         materialIds.add(item.getMaterialId());
       }
     }
-    Map<String, BigDecimal> manuals = new HashMap<>();
+    Map<String, BatchMaterial> materials = new HashMap<>();
     if (materialIds.isEmpty()) {
-      return manuals;
+      return materials;
     }
     for (BatchMaterial material : batchMaterialMapper.selectBatchIds(materialIds)) {
-      if (material.getManualSalesPrice() != null && material.getManualSalesPrice().signum() > 0) {
-        manuals.put(material.getId(), material.getManualSalesPrice());
-      }
+      materials.put(material.getId(), material);
     }
-    return manuals;
+    return materials;
+  }
+
+  private static BatchMaterial materialOf(DocumentItem item, Map<String, BatchMaterial> materials) {
+    return item != null && StringUtils.hasText(item.getMaterialId())
+        ? materials.get(item.getMaterialId()) : null;
   }
 
   /** 行的人工价：材料级（新口径）＞ 行级 sales_unit_price（历史口径）。 */
-  private static BigDecimal manualOf(DocumentItem item, Map<String, BigDecimal> materialManuals) {
+  private static BigDecimal manualOf(DocumentItem item, Map<String, BatchMaterial> materials) {
+    return manualOf(item, materialOf(item, materials));
+  }
+
+  private static BigDecimal manualOf(DocumentItem item, BatchMaterial material) {
     if (item == null) {
       return null;
     }
-    BigDecimal materialManual = StringUtils.hasText(item.getMaterialId())
-        ? materialManuals.get(item.getMaterialId()) : null;
-    return materialManual != null ? materialManual : item.getSalesUnitPrice();
+    BigDecimal materialManual = material == null ? null : material.getManualSalesPrice();
+    if (materialManual != null && materialManual.signum() > 0) {
+      return materialManual;
+    }
+    return item.getSalesUnitPrice();
   }
 
   /** 单行取价：人工值优先，其次按口径推算。 */
   public Price priceOf(DocumentItem item, DeliveryNetPriceService.PricingPolicy policy,
                        DocumentItemMarketMapping mapping) {
-    return priceOf(item, policy, mapping, item == null ? null : item.getSalesUnitPrice());
+    // 便捷入口无材料行上下文，拿不到人工网价，传 null 回退到锁定行情价（与批量入口一致）
+    return priceOf(item, policy, mapping, item == null ? null : item.getSalesUnitPrice(), null);
   }
 
   private Price priceOf(DocumentItem item, DeliveryNetPriceService.PricingPolicy policy,
-                        DocumentItemMarketMapping mapping, BigDecimal manual) {
-    BigDecimal auto = policy == null ? null : autoPrice(item, policy, mapping);
+                        DocumentItemMarketMapping mapping, BigDecimal manual,
+                        BigDecimal manualNetPrice) {
+    BigDecimal auto = policy == null ? null : autoPrice(item, policy, mapping, manualNetPrice);
     return new Price(auto, manual, manual != null ? manual : auto);
   }
 
+  /**
+   * 自动销价：网价优先取锁定行情行，没有锁定行时用材料行的人工网价（2026-11-12 补）。
+   * 人工网价与行情价同为「网价」，上浮口径直接在其上加价；毛利率口径不用网价，不受影响。
+   */
   private BigDecimal autoPrice(DocumentItem item, DeliveryNetPriceService.PricingPolicy policy,
-                               DocumentItemMarketMapping mapping) {
+                               DocumentItemMarketMapping mapping, BigDecimal manualNetPrice) {
     BigDecimal netPrice = mapping == null ? null : mapping.getQuotePrice();
+    if (netPrice == null || netPrice.signum() <= 0) {
+      netPrice = manualNetPrice;
+    }
     return policy.salesUnitPriceFromCost(costPrice(item), netPrice);
   }
 

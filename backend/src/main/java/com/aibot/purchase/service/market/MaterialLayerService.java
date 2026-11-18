@@ -101,6 +101,8 @@ public class MaterialLayerService {
       String quoteSource,
       String supplyItemId,
       BigDecimal manualSalesPrice,
+      /** 人工网价（元/吨）：非空时锁定网价直接用它，优先于行情库取价；只影响本材料/本批次。 */
+      BigDecimal manualQuotePrice,
       BigDecimal purchaseTons,
       BigDecimal purchasePrice,
       int purchaseRows,
@@ -270,7 +272,16 @@ public class MaterialLayerService {
       // 按产品而非全局解析：部分日（截图只导一个品类）不会遮掉其他品类自己的最近行情日。
       String quoteDateText = null;
       BigDecimal lockedNetPrice = null;
-      if (StringUtils.hasText(material.getQuoteProductCode())
+      BigDecimal manualQuotePrice = material.getManualQuotePrice();
+      if (manualQuotePrice != null && manualQuotePrice.signum() > 0) {
+        // 人工网价优先（2026-11-12）：不查行情库，也不依赖取价日有没有数据；
+        // 取价日仍解析出来展示（它能说明"如果不人工定价会取哪一天"）
+        LocalDate manualDay = resolveLockedDay(material.getQuoteDate(),
+            material.getQuoteProductCode(), lockedDayCache);
+        quoteDateText = (manualDay != null ? manualDay : material.getQuoteDate()) == null
+            ? null : (manualDay != null ? manualDay : material.getQuoteDate()).toString();
+        lockedNetPrice = manualQuotePrice;
+      } else if (StringUtils.hasText(material.getQuoteProductCode())
           && StringUtils.hasText(material.getQuoteSpecName())) {
         LocalDate lockedDay = resolveLockedDay(material.getQuoteDate(),
             material.getQuoteProductCode(), lockedDayCache);
@@ -279,6 +290,19 @@ public class MaterialLayerService {
           lockedNetPrice = specPrice(lockedDay, material.getQuoteProductCode(),
               material.getQuoteSpecName(), material.getOrigin(), quoteCache);
         }
+      }
+      // 只有送货行、没有采购行的材料（「0 采购行 / N 送货行」）：
+      // 销价上面是按「单价 × 采购吨数」加权算的，采购吨数为 0 就永远加权不出价，
+      // 于是明明绑了行情、锁定价也在，却显示「待网价」。按两级兜底（2026-11-12）：
+      //   ① 送货单已锁定金额 → 金额 ÷ 送货吨数（反映实际成交，最贴近这行钱）；
+      //   ② 否则上浮口径直接用锁定网价 + 上浮（不需要采购价）。
+      if (salesPrice == null && deliveryAmount.signum() > 0 && deliveryTons.signum() > 0) {
+        salesPrice = deliveryAmount.divide(deliveryTons, 2, RoundingMode.HALF_UP);
+        salesPriceBasis = "lock";
+      } else if (salesPrice == null && policy != null && "uplift".equals(policy.mode())
+          && lockedNetPrice != null && lockedNetPrice.signum() > 0) {
+        salesPrice = policy.salesUnitPrice(lockedNetPrice);
+        salesPriceBasis = "uplift";
       }
       rows.add(new MaterialRow(
           material.getId(),
@@ -296,6 +320,7 @@ public class MaterialLayerService {
           material.getQuoteSource(),
           material.getSupplyItemId(),
           material.getManualSalesPrice(),
+          manualQuotePrice,
           purchaseTons.signum() > 0 ? purchaseTons : null,
           purchasePrice,
           pricedRows,
@@ -334,7 +359,9 @@ public class MaterialLayerService {
     if (StringUtils.hasText(materialOrigin)) {
       List<com.aibot.purchase.entity.MarketQuote> byOrigin = filterByOrigin(sameSpec, materialOrigin);
       if (!byOrigin.isEmpty()) {
-        return average(byOrigin);
+        // 产地命中的多行：来源优先（mysteel 权威价 > gtgqw 爬取价），同来源才平均——
+        // 否则人工改价会被爬取价稀释（实测 3540 vs 3310 → 显示 3425）
+        return MaterialMarketMatchService.priceOf(byOrigin);
       }
     }
     return average(sameSpec);
@@ -412,18 +439,22 @@ public class MaterialLayerService {
   }
 
   /**
-   * 材料级改价（市场行情 · 批次材料表，2026-11-04）：把该材料<b>取价日</b>的绑定规格价钉成权威价。
+   * 材料级改价（市场行情 · 批次材料表，2026-11-12 重构）：改的是<b>这张材料自己的网价</b>。
    *
-   * <p>不直接改爬取行——同规格当天可能有多产地/多城市，改哪条有歧义；改为 upsert 一条
-   * {@code source='mysteel'} 的权威价（城市取当日同规格行情行所在城市，产地用材料自己的），
-   * 权威优先保证取价一定用它，且不破坏爬取数据。改完按产品+规格刷新受影响批次，
-   * 与截图导入/行情改价走同一条刷新通道。返回刷新的批次数。
+   * <p>写 {@code batch_materials.manual_quote_price}，<b>不再往 market_quotes 里钉 mysteel 行</b>。
+   * 旧做法是「冒充行情库」：行情库是全局的，改一条会改掉所有批次同产品同规格同产地的取价，
+   * 而且同一规格被多条材料共用时（如盘螺 8 与 10 都绑 Φ8-10）改一条会串到另一条。
+   *
+   * <p>作用域：只影响本材料、本批次；重算只重锁本批次（采购单行情价 + 送货单销售价 + 台账差额）。
+   * 要改「市场行情」请去行情 Tab（那是全局的，会刷新受影响批次）。
+   *
+   * @param price 元/吨；<b>null = 清空人工网价，恢复按行情库取价</b>
    */
   @Transactional
-  public com.aibot.purchase.service.market.MarketQuoteImportService.ImportOutcome updateMaterialQuotePrice(String materialId, BigDecimal price) {
-    if (price == null || price.signum() <= 0) {
+  public ManualQuoteResult updateMaterialQuotePrice(String materialId, BigDecimal price) {
+    if (price != null && price.signum() <= 0) {
       throw new com.aibot.purchase.common.ApiException(
-          org.springframework.http.HttpStatus.BAD_REQUEST, "价格必须大于 0");
+          org.springframework.http.HttpStatus.BAD_REQUEST, "价格必须大于 0；清空请留空提交");
     }
     BatchMaterial material = materialMapper.selectById(materialId);
     if (material == null) {
@@ -433,64 +464,23 @@ public class MaterialLayerService {
     if (!StringUtils.hasText(material.getQuoteProductCode())
         || !StringUtils.hasText(material.getQuoteSpecName())) {
       throw new com.aibot.purchase.common.ApiException(
-          org.springframework.http.HttpStatus.BAD_REQUEST, "该材料还没有绑定网价，请先绑定");
+          org.springframework.http.HttpStatus.BAD_REQUEST, "该材料还没有绑定行情规格，请先绑定再改价");
     }
-    LocalDate day = resolveLockedDay(material.getQuoteDate(),
-        material.getQuoteProductCode(), new HashMap<>());
-    if (day == null) {
-      throw new com.aibot.purchase.common.ApiException(
-          org.springframework.http.HttpStatus.BAD_REQUEST, "行情库还没有数据，无法改价");
-    }
-    List<com.aibot.purchase.entity.MarketQuote> sameSpec = quotesOf(
-            day, material.getQuoteProductCode(), new HashMap<>()).stream()
-        .filter(quote -> material.getQuoteSpecName().equals(quote.getSpecName()))
-        .filter(quote -> quote.getPrice() != null && quote.getPrice().signum() > 0)
-        .toList();
-    if (sameSpec.isEmpty()) {
-      throw new com.aibot.purchase.common.ApiException(
-          org.springframework.http.HttpStatus.BAD_REQUEST,
-          "取价日（" + day + "）没有该规格的行情，无法改价");
-    }
-    // 改价只改「本批次行情城市」的那条权威价（历史脏数据里同规格可能还挂着别的城市/产地当城市的行）
-    String city = marketCities.preferCity(sameSpec).get(0).getCity();
-    String origin = StringUtils.hasText(material.getOrigin()) ? material.getOrigin() : "";
-    com.aibot.purchase.entity.MarketQuote existing = quoteMapper.selectOne(
-        Wrappers.<com.aibot.purchase.entity.MarketQuote>lambdaQuery()
-            .eq(com.aibot.purchase.entity.MarketQuote::getQuoteDate, day)
-            .eq(com.aibot.purchase.entity.MarketQuote::getSource,
-                com.aibot.purchase.service.market.MarketQuoteImportService.SOURCE_AUTHORITATIVE)
-            .eq(com.aibot.purchase.entity.MarketQuote::getProductCode, material.getQuoteProductCode())
-            .eq(com.aibot.purchase.entity.MarketQuote::getSpecName, material.getQuoteSpecName())
-            .eq(com.aibot.purchase.entity.MarketQuote::getCity, city)
-            .eq(com.aibot.purchase.entity.MarketQuote::getOrigin, origin)
-            .last("LIMIT 1"));
-    if (existing != null) {
-      quoteMapper.update(null, Wrappers.<com.aibot.purchase.entity.MarketQuote>lambdaUpdate()
-          .eq(com.aibot.purchase.entity.MarketQuote::getId, existing.getId())
-          .set(com.aibot.purchase.entity.MarketQuote::getPrice, price)
-          .set(com.aibot.purchase.entity.MarketQuote::getCapturedAt, LocalDateTime.now()));
-    } else {
-      com.aibot.purchase.entity.MarketQuote quote = new com.aibot.purchase.entity.MarketQuote();
-      quote.setQuoteDate(day);
-      quote.setSource(com.aibot.purchase.service.market.MarketQuoteImportService.SOURCE_AUTHORITATIVE);
-      quote.setProductCode(material.getQuoteProductCode());
-      quote.setProductName(sameSpec.get(0).getProductName());
-      quote.setSpecName(material.getQuoteSpecName());
-      quote.setSpec(sameSpec.get(0).getSpec());
-      quote.setGrade(sameSpec.get(0).getGrade());
-      quote.setCity(city);
-      quote.setOrigin(origin);
-      quote.setPrice(price);
-      quote.setCapturedAt(LocalDateTime.now());
-      quoteMapper.insert(quote);
-    }
-    log.info("材料 {} 取价日 {} 绑定规格 {} 钉权威价 {}，刷新受影响批次",
-        materialId, day, material.getQuoteSpecName(), price);
-    com.aibot.purchase.service.market.MarketQuoteImportService.ImportOutcome outcome =
-        marketQuoteImportService.refreshAffectedBatches(
-            Set.of(material.getQuoteProductCode()), Set.of(material.getQuoteSpecName()),
-            material.getBatchId());
-    return outcome;
+    // 可空列必须显式 set：updateById 会跳过 null，清空会失效（价格落库统一用显式 set）
+    materialMapper.update(null, Wrappers.<BatchMaterial>lambdaUpdate()
+        .eq(BatchMaterial::getId, material.getId())
+        .set(BatchMaterial::getManualQuotePrice, price)
+        .set(BatchMaterial::getUpdatedAt, LocalDateTime.now()));
+    // 只重锁本批次：人工价是本材料参数，与其它批次无关
+    int relocked = deliveryNetPriceService.rerunBatch(material.getBatchId());
+    log.info("材料 {}（{} {} {}）人工网价 {} → 只重锁本批次 {} 行，行情库未改动",
+        materialId, material.getCategory(), material.getDiameter(), material.getOrigin(),
+        price == null ? "清空（恢复行情价）" : price, relocked);
+    return new ManualQuoteResult(price, relocked);
+  }
+
+  /** 材料人工网价结果：manualQuotePrice=生效值（null=已清空恢复行情价），relocked=重锁的送货单数。 */
+  public record ManualQuoteResult(BigDecimal manualQuotePrice, int relocked) {
   }
 
   /** 绑定请求：manualSalesPrice 选填（元/吨），非空=材料级人工销售价优先于口径推算；显式传 null 可清除。 */
