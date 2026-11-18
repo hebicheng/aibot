@@ -49,7 +49,7 @@ class LedgerExportServiceTest {
     BatchDto batch = new BatchDto("b1", "p1", "测试项目", "批次1",
         LocalDate.of(2026, 9, 1), "螺纹钢", "进行中", 0,
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, "",
-        java.util.Map.of(), null);
+        java.util.Map.of(), null, false, BigDecimal.ZERO, "未收款");
 
     when(businessQueryService.getProject("u1", "p1")).thenReturn(project);
     when(businessQueryService.listBatches("u1", "p1")).thenReturn(List.of(batch));

@@ -1,4 +1,4 @@
-export type PageKey = 'workspace' | 'projects' | 'documents' | 'ledger' | 'market';
+export type PageKey = 'workspace' | 'projects' | 'documents' | 'ledger' | 'company' | 'market';
 export type DocumentStatus = '已匹配' | '待确认' | '识别中' | '有差异' | '重复归档';
 
 export interface Project {
@@ -23,8 +23,10 @@ export interface Project {
   salesInvoiced: number;
   /** 总收款 */
   received: number;
-  /** 应收款 = 销售合同总额 − 总收款 */
+  /** 剩余应收 = max(销售合同总额 − 总收款, 0) */
   receivable: number;
+  /** 应收差额 = 销售合同总额 − 总收款，可为负（多收） */
+  differenceAmount: number;
   /** 未开票 = 销售合同总额 − 总开票 */
   uninvoicedSales: number;
   profit: number;
@@ -47,6 +49,12 @@ export interface Batch {
   salesInvoiced: number;
   received: number;
   progress: number;
+  /** 销售金额（应收） */
+  sales: number;
+  /** 是否已对账（人工勾选） */
+  reconciled: boolean;
+  /** 收款状态：未收款 / 部分收款 / 已收款 */
+  receiptStatus: '未收款' | '部分收款' | '已收款';
   /** 批次级业务默认口径（按单据类型 scope 分组，本期仅 delivery_note） */
   businessHints?: Record<string, Record<string, unknown>>;
 }

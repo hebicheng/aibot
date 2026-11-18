@@ -1,71 +1,97 @@
 package com.aibot.purchase.service;
 
+import com.aibot.purchase.entity.Batch;
 import com.aibot.purchase.entity.Document;
 import com.aibot.purchase.entity.DocumentItem;
 import com.aibot.purchase.entity.DocumentItemMarketMapping;
+import com.aibot.purchase.entity.FreightItem;
 import com.aibot.purchase.entity.Project;
+import com.aibot.purchase.entity.ProjectReceipt;
+import com.aibot.purchase.entity.ProjectReceiptAllocation;
+import com.aibot.purchase.entity.User;
+import com.aibot.purchase.mapper.BatchMapper;
 import com.aibot.purchase.mapper.DocumentItemMapper;
 import com.aibot.purchase.mapper.DocumentItemMarketMappingMapper;
 import com.aibot.purchase.mapper.DocumentMapper;
+import com.aibot.purchase.mapper.FreightItemMapper;
 import com.aibot.purchase.mapper.ProjectMapper;
-import com.aibot.purchase.service.storage.FileStorage;
+import com.aibot.purchase.mapper.ProjectReceiptAllocationMapper;
+import com.aibot.purchase.mapper.ProjectReceiptMapper;
+import com.aibot.purchase.mapper.UserMapper;
+import com.aibot.purchase.service.market.MaterialIdentity;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import org.apache.poi.common.usermodel.PictureType;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
-import org.apache.poi.ss.usermodel.ClientAnchor;
-import org.apache.poi.ss.usermodel.Drawing;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.apache.poi.ss.util.CellRangeAddress;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 /**
- * 对账单导出（销售侧，模板：resources/对账单-模板.xlsx）。
+ * 对账单导出（销售侧，模板：resources/对账单-模板.xlsx，2026-11-17 改为客户钢材对账单样式）。
  *
- * <p>口径：明细行 = 项目内送货单日期 ∈ [start, end] 的已确认送货单明细（网价/上浮/销售单价/
- * 金额全部读 {@link DocumentItemMarketMapping} 锁定值，无映射回退明细行自身值）；
- * 本次供应量/供货金额 = 范围内合计；累计 = 项目内送货单日期 ≤ end（含本次）；
- * 本次/累计已支付 = 回款单（receipt）按 docDate 落在范围内 / ≤ end 累加。
- * 一次导出 = 一个日期范围一个 sheet；J 列按日期合并（同日期多张送货单并入同一日期格），
- * 每张送货单图片在首行放一次，按最长边等比缩放适配单元格并居中。
- * 已删除（软删）批次归属的单据不导出；无批次归属的项目级单据正常导出。
+ * <p>筛选口径：
+ * <ul>
+ *   <li>明细 = 项目内送货单日期 ∈ [start, end] 的已确认、已入台账送货单；</li>
+ *   <li>传 material 时只取「批次材料」（新建批次时填写的材料）等于该值的批次，
+ *       累计供应量/供货金额与本次/累计支付同样只统计这些批次；</li>
+ *   <li>已删除批次的单据不导出。</li>
+ * </ul>
+ *
+ * <p>样式（对齐客户样表）：序号 / 钢材名称（大类 + 牌号）/ 规格型号（直径*定尺）/ 数量（吨）/
+ * 网价 / 上浮额 / 计量单价 / 小计 / 日期（同一天只在首行写）/ 备注（产地或品牌，不再插送货单图片）。
+ * 客户承担的销售运费单独成「运费」行，金额计入小计与合计，不计入数量。
  */
 @Service
 public class ReconciliationExportService {
 
   /** 模板布局（1-based 行号） */
-  private static final int TPL_HEADER_ROW = 6;
   private static final int TPL_DETAIL_ROW = 7;
-  private static final int TPL_TAIL_FIRST = 8;
+  private static final int TPL_TOTAL_ROW = 8;
   private static final int TPL_TAIL_LAST = 20;
-  private static final int COL_COUNT = 12;
-  /** 插图列（K，0-based）；插图行行高（点） */
-  private static final int IMAGE_COLUMN = 10;
-  private static final float IMAGE_ROW_HEIGHT = 70f;
-  /** 1px = 9525 EMU（96dpi） */
-  private static final long EMU_PER_PX = 9525;
+  private static final int COL_COUNT = 10;
+  private static final float DETAIL_ROW_HEIGHT = 32f;
+
+  private static final int COL_SEQ = 0;
+  private static final int COL_NAME = 1;
+  private static final int COL_SPEC = 2;
+  private static final int COL_QTY = 3;
+  private static final int COL_QUOTE = 4;
+  private static final int COL_UPLIFT = 5;
+  private static final int COL_PRICE = 6;
+  private static final int COL_AMOUNT = 7;
+  private static final int COL_DATE = 8;
+  private static final int COL_REMARK = 9;
+
+  private static final String FREIGHT_LABEL = "运费";
 
   private final BusinessQueryService businessQueryService;
   private final DocumentMapper documentMapper;
   private final DocumentItemMapper documentItemMapper;
   private final DocumentItemMarketMappingMapper itemNetMappingMapper;
   private final ProjectMapper projectMapper;
-  private final FileStorage fileStorage;
+  private final ProjectReceiptMapper receiptMapper;
+  private final ProjectReceiptAllocationMapper allocationMapper;
+  private final BatchMapper batchMapper;
+  private final FreightItemMapper freightItemMapper;
+  private final UserMapper userMapper;
 
   public ReconciliationExportService(
       BusinessQueryService businessQueryService,
@@ -73,52 +99,75 @@ public class ReconciliationExportService {
       DocumentItemMapper documentItemMapper,
       DocumentItemMarketMappingMapper itemNetMappingMapper,
       ProjectMapper projectMapper,
-      FileStorage fileStorage
+      ProjectReceiptMapper receiptMapper,
+      ProjectReceiptAllocationMapper allocationMapper,
+      BatchMapper batchMapper,
+      FreightItemMapper freightItemMapper,
+      UserMapper userMapper
   ) {
     this.businessQueryService = businessQueryService;
     this.documentMapper = documentMapper;
     this.documentItemMapper = documentItemMapper;
     this.itemNetMappingMapper = itemNetMappingMapper;
     this.projectMapper = projectMapper;
-    this.fileStorage = fileStorage;
+    this.receiptMapper = receiptMapper;
+    this.allocationMapper = allocationMapper;
+    this.batchMapper = batchMapper;
+    this.freightItemMapper = freightItemMapper;
+    this.userMapper = userMapper;
   }
 
-  private record DetailRow(
+  /** 一行对账明细：材料行或运费行。 */
+  record Line(
       Document document,
-      DocumentItem item,
-      DocumentItemMarketMapping mapping,
+      boolean freight,
+      String name,
+      String spec,
       BigDecimal quantity,
-      String unit
+      Object quotePrice,
+      Object uplift,
+      Object unitPrice,
+      BigDecimal amount,
+      String remark
   ) {}
+
+  /** 导出范围：项目 + 可选材料（批次材料） + 日期。 */
+  private record Scope(String projectId, String material, Set<String> batchIds) {
+    boolean filtered() {
+      return StringUtils.hasText(material);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // 对外入口
   // ---------------------------------------------------------------------------
 
   public byte[] export(String userId, String projectId, LocalDate start, LocalDate end) {
+    return export(userId, projectId, start, end, null);
+  }
+
+  public byte[] export(String userId, String projectId, LocalDate start, LocalDate end, String material) {
     Project project = loadOwnedProject(userId, projectId);
-    List<Document> deliveriesInRange = listDeliveries(projectId, start, end);
-    List<Document> deliveriesCumulative = listDeliveries(projectId, null, end);
-    List<Document> receiptsInRange = listReceipts(projectId, start, end);
-    List<Document> receiptsCumulative = listReceipts(projectId, null, end);
+    Scope scope = scope(projectId, material);
+    List<Document> cumulativeDeliveries = listDeliveries(scope, null, end);
+    List<Document> rangeDeliveries = inRange(cumulativeDeliveries, start, end);
+    Map<String, String> freightAnchors = tripFreightAnchors(cumulativeDeliveries);
+    List<Line> rangeLines = buildLines(rangeDeliveries, freightAnchors);
+    List<Line> cumulativeLines = buildLines(cumulativeDeliveries, freightAnchors);
+    BigDecimal rangePaid = sumReceipts(scope, start, end);
+    BigDecimal cumulativePaid = sumReceipts(scope, null, end);
 
     try (InputStream in = new ClassPathResource("对账单-模板.xlsx").getInputStream();
          Workbook workbook = WorkbookFactory.create(in);
          ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       Sheet sheet = workbook.getSheetAt(0);
-      List<DetailRow> detailRows = loadDetailRows(deliveriesInRange);
-      int n = detailRows.size();
-      writeHeader(sheet, project, start, end);
-      if (n > 0) {
-        sheet.shiftRows(TPL_DETAIL_ROW - 1, TPL_TAIL_LAST - 1, n);
-      }
-      writeDetailRows(workbook, sheet, detailRows);
-      int offset = n;
-      writeTotals(sheet, offset, detailRows);
+      writeHeader(sheet, project, supplierName(userId), start, end, scope.material());
+      int offset = writeDetailRows(sheet, rangeLines);
+      writeTotals(sheet, offset, rangeLines);
       writeSummary(sheet, offset,
-          sumQuantity(detailRows), sumAmount(detailRows),
-          cumulativeQuantity(deliveriesCumulative), cumulativeAmount(deliveriesCumulative),
-          sumDocAmount(receiptsInRange), sumDocAmount(receiptsCumulative));
+          sumQuantity(rangeLines), sumAmount(rangeLines),
+          sumQuantity(cumulativeLines), sumAmount(cumulativeLines),
+          rangePaid, cumulativePaid);
       workbook.write(out);
       return out.toByteArray();
     } catch (Exception ex) {
@@ -127,9 +176,33 @@ public class ReconciliationExportService {
   }
 
   public String fileName(String userId, String projectId, LocalDate start, LocalDate end) {
+    return fileName(userId, projectId, start, end, null);
+  }
+
+  public String fileName(String userId, String projectId, LocalDate start, LocalDate end, String material) {
     Project project = loadOwnedProject(userId, projectId);
     String name = StringUtils.hasText(project.getName()) ? project.getName() : "项目";
-    return "对账单-" + name + "-" + start + "_" + end + ".xlsx";
+    String materialPart = StringUtils.hasText(material) ? "-" + material.trim() : "";
+    return "对账单-" + name + materialPart + "-" + start + "_" + end + ".xlsx";
+  }
+
+  /**
+   * 可选材料：项目内有效批次填写的材料（去重，按首次出现顺序）。
+   * 前端导出弹框/聊天卡片据此渲染「材料」下拉，空值批次不列出。
+   */
+  public List<String> materialOptions(String userId, String projectId) {
+    loadOwnedProject(userId, projectId);
+    return batchMapper.selectList(Wrappers.<Batch>lambdaQuery()
+            .eq(Batch::getProjectId, projectId)
+            .orderByAsc(Batch::getBusinessDate)
+            .orderByAsc(Batch::getCreatedAt))
+        .stream()
+        .map(Batch::getMaterialSummary)
+        .filter(StringUtils::hasText)
+        .map(String::trim)
+        .collect(Collectors.toCollection(LinkedHashSet::new))
+        .stream()
+        .toList();
   }
 
   private Project loadOwnedProject(String userId, String projectId) {
@@ -142,36 +215,39 @@ public class ReconciliationExportService {
     return project;
   }
 
-  /** 范围汇总（卡片展示用）：范围内送货单张数 + 锁定销售额合计 */
-  public record RangeSummary(int deliveries, java.math.BigDecimal salesAmount) {}
+  /** 范围汇总（卡片展示用）：范围内送货单张数 + 对账金额（货款 + 客户承担运费，与导出小计合计一致） */
+  public record RangeSummary(int deliveries, BigDecimal salesAmount) {}
 
-  /** 卡片实时汇总视图：项目/客户信息 + 指定日期范围的张数与锁定销售额（前端改日期即重取） */
+  /** 卡片实时汇总视图：项目/客户信息 + 指定日期范围（可选材料）的张数与对账金额 */
   public Map<String, Object> summaryView(String userId, String projectId, LocalDate start, LocalDate end) {
+    return summaryView(userId, projectId, start, end, null);
+  }
+
+  public Map<String, Object> summaryView(
+      String userId, String projectId, LocalDate start, LocalDate end, String material) {
     Project project = loadOwnedProject(userId, projectId);
-    RangeSummary summary = rangeSummary(userId, projectId, start, end);
+    RangeSummary summary = rangeSummary(userId, projectId, start, end, material);
     Map<String, Object> view = new LinkedHashMap<>();
     view.put("projectName", nzStr(project.getName()));
     view.put("customerName", nzStr(project.getCustomerName()));
+    view.put("material", StringUtils.hasText(material) ? material.trim() : null);
     view.put("deliveries", summary.deliveries());
     view.put("salesAmount", summary.salesAmount());
     return view;
   }
 
   public RangeSummary rangeSummary(String userId, String projectId, LocalDate start, LocalDate end) {
+    return rangeSummary(userId, projectId, start, end, null);
+  }
+
+  public RangeSummary rangeSummary(
+      String userId, String projectId, LocalDate start, LocalDate end, String material) {
     loadOwnedProject(userId, projectId);
-    List<Document> deliveries = listDeliveries(projectId, start, end);
-    BigDecimal sales = BigDecimal.ZERO;
-    if (!deliveries.isEmpty()) {
-      List<String> documentIds = deliveries.stream().map(Document::getId).toList();
-      sales = itemNetMappingMapper.selectList(Wrappers.<DocumentItemMarketMapping>lambdaQuery()
-              .in(DocumentItemMarketMapping::getDocumentId, documentIds)
-              .ne(DocumentItemMarketMapping::getPriceBasis, "unmatched"))
-          .stream()
-          .map(DocumentItemMarketMapping::getAmount)
-          .map(ReconciliationExportService::nz)
-          .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-    return new RangeSummary(deliveries.size(), sales);
+    Scope scope = scope(projectId, material);
+    List<Document> cumulative = listDeliveries(scope, null, end);
+    List<Document> range = inRange(cumulative, start, end);
+    List<Line> lines = buildLines(range, tripFreightAnchors(cumulative));
+    return new RangeSummary(range.size(), sumAmount(lines));
   }
 
   // ---------------------------------------------------------------------------
@@ -181,35 +257,96 @@ public class ReconciliationExportService {
   /**
    * 排除归属批次已软删的单据；batch_id 为空（项目级单据）不受影响。
    * 批次软删不回写单据（BusinessQueryService.deleteBatch 只置 batches.deleted），
-   * 导出侧必须自行过滤，否则已删批次的送货单/回款单仍会进对账单。
+   * 导出侧必须自行过滤，否则已删批次的送货单仍会进对账单。
    */
   private static final String EXCLUDE_DELETED_BATCH =
       "select 1 from batches b where b.id = documents.batch_id and b.deleted = 1";
 
-  private List<Document> listDeliveries(String projectId, LocalDate start, LocalDate end) {
-    return documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getProjectId, projectId)
-            .eq(Document::getDocType, "delivery_note")
-            .eq(Document::getStatus, "matched")
-            .eq(Document::getLedgerApplied, true)
-            .notExists(EXCLUDE_DELETED_BATCH)
-            .le(end != null, Document::getDocDate, end)
-            .ge(start != null, Document::getDocDate, start)
-            .orderByAsc(Document::getDocDate)
-            .orderByAsc(Document::getCreatedAt));
+  private Scope scope(String projectId, String material) {
+    if (!StringUtils.hasText(material)) {
+      return new Scope(projectId, null, Set.of());
+    }
+    String wanted = material.trim();
+    Set<String> batchIds = batchMapper.selectList(Wrappers.<Batch>lambdaQuery()
+            .eq(Batch::getProjectId, projectId))
+        .stream()
+        .filter(batch -> StringUtils.hasText(batch.getMaterialSummary())
+            && wanted.equals(batch.getMaterialSummary().trim()))
+        .map(Batch::getId)
+        .collect(Collectors.toCollection(LinkedHashSet::new));
+    return new Scope(projectId, wanted, batchIds);
   }
 
-  private List<Document> listReceipts(String projectId, LocalDate start, LocalDate end) {
-    return documentMapper.selectList(Wrappers.<Document>lambdaQuery()
-            .eq(Document::getProjectId, projectId)
-            .eq(Document::getDocType, "receipt")
-            .eq(Document::getStatus, "matched")
-            .notExists(EXCLUDE_DELETED_BATCH)
-            .le(end != null, Document::getDocDate, end)
-            .ge(start != null, Document::getDocDate, start));
+  /** 截至 end（含）的已确认送货单，按日期、创建时间排序；材料筛选时限定批次。 */
+  private List<Document> listDeliveries(Scope scope, LocalDate start, LocalDate end) {
+    if (scope.filtered() && scope.batchIds().isEmpty()) {
+      return new ArrayList<>();
+    }
+    return new ArrayList<>(documentMapper.selectList(Wrappers.<Document>lambdaQuery()
+        .eq(Document::getProjectId, scope.projectId())
+        .eq(Document::getDocType, "delivery_note")
+        .eq(Document::getStatus, "matched")
+        .eq(Document::getLedgerApplied, true)
+        .in(scope.filtered(), Document::getBatchId, scope.batchIds())
+        .notExists(EXCLUDE_DELETED_BATCH)
+        .le(end != null, Document::getDocDate, end)
+        .ge(start != null, Document::getDocDate, start)
+        .orderByAsc(Document::getDocDate)
+        .orderByAsc(Document::getCreatedAt)));
   }
 
-  private List<DetailRow> loadDetailRows(List<Document> deliveries) {
+  private static List<Document> inRange(List<Document> deliveries, LocalDate start, LocalDate end) {
+    return deliveries.stream()
+        .filter(document -> document.getDocDate() != null)
+        .filter(document -> start == null || !document.getDocDate().isBefore(start))
+        .filter(document -> end == null || !document.getDocDate().isAfter(end))
+        .toList();
+  }
+
+  /**
+   * 回款：不筛材料时取项目收款合计（含未落到批次上的部分，与项目汇总一致）；
+   * 筛材料时只取分摊到这些批次上的金额，按收款日期统计。
+   */
+  private BigDecimal sumReceipts(Scope scope, LocalDate start, LocalDate end) {
+    List<ProjectReceipt> receipts = receiptMapper.selectList(Wrappers.<ProjectReceipt>lambdaQuery()
+        .eq(ProjectReceipt::getProjectId, scope.projectId())
+        .le(end != null, ProjectReceipt::getReceiptDate, end)
+        .ge(start != null, ProjectReceipt::getReceiptDate, start));
+    if (!scope.filtered()) {
+      return receipts.stream()
+          .map(ProjectReceipt::getAmount)
+          .map(ReconciliationExportService::nz)
+          .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    if (receipts.isEmpty() || scope.batchIds().isEmpty()) {
+      return BigDecimal.ZERO;
+    }
+    return allocationMapper.selectList(Wrappers.<ProjectReceiptAllocation>lambdaQuery()
+            .in(ProjectReceiptAllocation::getReceiptId,
+                receipts.stream().map(ProjectReceipt::getId).toList())
+            .in(ProjectReceiptAllocation::getBatchId, scope.batchIds()))
+        .stream()
+        .map(ProjectReceiptAllocation::getAmount)
+        .map(ReconciliationExportService::nz)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+  }
+
+  /**
+   * 按趟包干的销售运费是批次级的一笔钱：挂在该批次（截至 end）最早的一张送货单后面，
+   * 导出范围包含那张送货单才出现，避免分段导出时每段都重复计一次。
+   */
+  private static Map<String, String> tripFreightAnchors(List<Document> cumulative) {
+    Map<String, String> anchors = new HashMap<>();
+    for (Document document : cumulative) {
+      if (StringUtils.hasText(document.getBatchId())) {
+        anchors.putIfAbsent(document.getBatchId(), document.getId());
+      }
+    }
+    return anchors;
+  }
+
+  /** 送货单 → 对账行：每张送货单的材料行，之后紧跟该单对应的运费行。 */
+  List<Line> buildLines(List<Document> deliveries, Map<String, String> tripAnchors) {
     if (deliveries.isEmpty()) {
       return new ArrayList<>();
     }
@@ -227,106 +364,198 @@ public class ReconciliationExportService {
             .in(DocumentItemMarketMapping::getDocumentId, documentIds))) {
       mappingByItem.put(mapping.getDocumentItemId(), mapping);
     }
-    List<DetailRow> rows = new ArrayList<>();
+    Map<String, List<FreightItem>> freightByBatch = salesFreightByBatch(deliveries);
+
+    List<Line> lines = new ArrayList<>();
     for (Document document : deliveries) {
-      for (DocumentItem item : itemsByDoc.getOrDefault(document.getId(), List.of())) {
-        DocumentItemMarketMapping mapping = mappingByItem.get(item.getId());
-        BigDecimal quantity = mapping != null && mapping.getPricingQuantity() != null
-            ? mapping.getPricingQuantity()
-            : item.getPricingQuantity();
-        String unit = mapping != null && StringUtils.hasText(mapping.getPricingUnit())
-            ? mapping.getPricingUnit()
-            : (StringUtils.hasText(item.getPricingUnit()) ? item.getPricingUnit() : item.getUnit());
-        rows.add(new DetailRow(document, item, mapping, quantity, unit));
+      List<DocumentItem> items = itemsByDoc.getOrDefault(document.getId(), List.of());
+      for (DocumentItem item : items) {
+        lines.add(materialLine(document, item, mappingByItem.get(item.getId())));
+      }
+      BigDecimal freight = deliveryFreight(document, items, mappingByItem,
+          freightByBatch.getOrDefault(document.getBatchId(), List.of()), tripAnchors);
+      if (freight.signum() > 0) {
+        lines.add(new Line(document, true, FREIGHT_LABEL, null, null, null, null, null,
+            freight, null));
       }
     }
-    return rows;
+    return lines;
+  }
+
+  private Map<String, List<FreightItem>> salesFreightByBatch(List<Document> deliveries) {
+    Set<String> batchIds = deliveries.stream()
+        .map(Document::getBatchId)
+        .filter(StringUtils::hasText)
+        .collect(Collectors.toSet());
+    if (batchIds.isEmpty()) {
+      return Map.of();
+    }
+    return freightItemMapper.selectList(Wrappers.<FreightItem>lambdaQuery()
+            .in(FreightItem::getBatchId, batchIds)
+            .eq(FreightItem::getSide, FreightService.SIDE_SALES))
+        .stream()
+        .collect(Collectors.groupingBy(FreightItem::getBatchId));
+  }
+
+  /**
+   * 一张送货单对应的销售运费（客户承担）：
+   * 单据写明的运费归本单；按吨口径 = 本单吨数 × 单价；按趟口径只挂批次最早的那张送货单。
+   */
+  private BigDecimal deliveryFreight(
+      Document document,
+      List<DocumentItem> items,
+      Map<String, DocumentItemMarketMapping> mappingByItem,
+      List<FreightItem> batchFreight,
+      Map<String, String> tripAnchors
+  ) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (FreightItem freight : batchFreight) {
+      String source = freight.getSource();
+      if (FreightService.SOURCE_DOCUMENT_STATED.equals(source)
+          && Objects.equals(freight.getSourceDocumentId(), document.getId())) {
+        total = total.add(nz(freight.getAmount()));
+      } else if (FreightService.SOURCE_POLICY_TON.equals(source) && freight.getUnitPrice() != null) {
+        BigDecimal tons = items.stream()
+            .map(item -> tonnage(item, mappingByItem.get(item.getId())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        total = total.add(tons.multiply(freight.getUnitPrice()).setScale(2, RoundingMode.HALF_UP));
+      } else if (FreightService.SOURCE_POLICY_TRIP.equals(source)
+          && document.getId().equals(tripAnchors.get(document.getBatchId()))) {
+        total = total.add(nz(freight.getAmount()));
+      }
+    }
+    return total;
+  }
+
+  private Line materialLine(Document document, DocumentItem item, DocumentItemMarketMapping mapping) {
+    MaterialIdentity.Identity identity =
+        MaterialIdentity.parse(item.getMaterialName(), item.getSpec(), item.getOrigin());
+    BigDecimal quantity = mapping != null && mapping.getPricingQuantity() != null
+        ? mapping.getPricingQuantity()
+        : item.getPricingQuantity();
+    Object unitPrice = mapping != null && mapping.getSalesUnitPrice() != null
+        ? mapping.getSalesUnitPrice()
+        : (item.getUnitPrice() != null ? item.getUnitPrice() : "/");
+    BigDecimal amount = mapping != null && mapping.getAmount() != null
+        ? mapping.getAmount()
+        : item.getAmount();
+    return new Line(document, false,
+        materialName(item, identity),
+        specText(item, identity),
+        quantity,
+        priceValue(mapping == null ? null : mapping.getQuotePrice()),
+        priceValue(mapping == null ? null : mapping.getUplift()),
+        unitPrice,
+        amount,
+        StringUtils.hasText(item.getOrigin()) ? item.getOrigin().trim() : null);
+  }
+
+  /** 钢材名称：大类 + 换行 + 牌号（如「螺纹钢\nHRB400E」）；识别不出大类回退原名。 */
+  static String materialName(DocumentItem item, MaterialIdentity.Identity identity) {
+    String category = identity.category();
+    String name = "未标注材料".equals(category)
+        ? nzStr(item.getMaterialName()).trim()
+        : category;
+    return identity.hasGrade() ? name + "\n" + identity.grade() : name;
+  }
+
+  /** 规格型号：直径*定尺（如「18*9」），盘螺等无定尺只写直径；解析不出回退原规格。 */
+  static String specText(DocumentItem item, MaterialIdentity.Identity identity) {
+    if (StringUtils.hasText(identity.diameter())) {
+      return StringUtils.hasText(identity.lengthM())
+          ? identity.diameter() + "*" + identity.lengthM()
+          : identity.diameter();
+    }
+    return nzStr(item.getSpec()).trim();
+  }
+
+  /** 明细吨数（按吨口径运费用）：锁定计价数量 → 明细重量 → 计价数量。 */
+  private static BigDecimal tonnage(DocumentItem item, DocumentItemMarketMapping mapping) {
+    if (mapping != null && mapping.getPricingQuantity() != null && isTon(mapping.getPricingUnit())) {
+      return mapping.getPricingQuantity();
+    }
+    BigDecimal weight = item.getTotalWeight();
+    if (weight != null && weight.signum() > 0) {
+      String unit = item.getWeightUnit() == null ? "" : item.getWeightUnit().trim().toLowerCase();
+      if (List.of("kg", "千克", "公斤").contains(unit)) {
+        return weight.divide(new BigDecimal("1000"), 6, RoundingMode.HALF_UP);
+      }
+      if (isTon(unit)) {
+        return weight;
+      }
+    }
+    if (item.getPricingQuantity() != null && isTon(item.getPricingUnit())) {
+      return item.getPricingQuantity();
+    }
+    return BigDecimal.ZERO;
+  }
+
+  private static boolean isTon(String unit) {
+    return unit != null && List.of("t", "ton", "吨").contains(unit.trim().toLowerCase());
+  }
+
+  private String supplierName(String userId) {
+    User user = userMapper.selectById(userId);
+    return user == null ? "" : nzStr(user.getCompanyName());
   }
 
   // ---------------------------------------------------------------------------
   // 模板填充
   // ---------------------------------------------------------------------------
 
-  private void writeHeader(Sheet sheet, Project project, LocalDate start, LocalDate end) {
-    Row title = sheet.getRow(0);
-    if (title != null) {
-      String customer = StringUtils.hasText(project.getCustomerName())
-          ? project.getCustomerName() : "";
-      title.getCell(0).setCellValue(customer + "（钢筋）对账单");
-    }
-    Row info = sheet.getRow(1);
-    if (info != null) {
-      if (info.getCell(0) != null) {
-        info.getCell(0).setCellValue("项目名称：" + nzStr(project.getName()));
-      }
-      if (info.getCell(8) != null) {
-        info.getCell(8).setCellValue("日期：" + start + " 至 " + end);
-      }
-    }
+  private void writeHeader(Sheet sheet, Project project, String supplier,
+      LocalDate start, LocalDate end, String material) {
+    setText(sheet, 0, 0, nzStr(project.getCustomerName()) + "钢材对账单");
+    setText(sheet, 1, 0, "项目名称：" + nzStr(project.getName()));
+    setText(sheet, 1, 5, "日期：" + chineseDate(start) + "——" + chineseDate(end));
+    setText(sheet, 2, 2, "无合同");
+    setText(sheet, 3, 2, supplier);
+    setText(sheet, 4, 0, StringUtils.hasText(material) ? "材料明细（" + material + "）" : "材料明细");
   }
 
-  private void writeDetailRows(Workbook workbook, Sheet sheet, List<DetailRow> detailRows) {
-    if (detailRows.isEmpty()) {
-      return;
+  private static String chineseDate(LocalDate date) {
+    return date == null ? "" : date.getYear() + "年" + date.getMonthValue() + "月" + date.getDayOfMonth() + "日";
+  }
+
+  /**
+   * 写明细并返回后续区块的下移行数：明细直接覆盖模板样式行，多出的行把合计及以下整体下移。
+   * 日期列同一天只在首行写「M月d日」，其余留空（对齐客户样表）。
+   */
+  private int writeDetailRows(Sheet sheet, List<Line> lines) {
+    int n = lines.size();
+    CellStyle[] styles = captureRowStyles(sheet, TPL_DETAIL_ROW - 1);
+    if (n == 0) {
+      return 0;
     }
-    // 模板行7（下移后位于 TPL_DETAIL_ROW-1+n）带边框样式；先捕获其样式供全部明细行复用
-    CellStyle[] styles = captureRowStyles(sheet, TPL_DETAIL_ROW - 1 + detailRows.size());
-    Drawing<?> drawing = sheet.createDrawingPatriarch();
+    if (n > 1) {
+      sheet.shiftRows(TPL_TOTAL_ROW - 1, TPL_TAIL_LAST - 1, n - 1, true, false);
+    }
     int rowIndex = TPL_DETAIL_ROW - 1;
     int seq = 1;
-    // J 列按日期合并：同日期的多个送货单并入同一日期格；图片按送货单在首行放一次
-    int mergeStart = -1;
-    String prevDocId = null;
     LocalDate prevDate = null;
-    for (DetailRow row : detailRows) {
-      LocalDate docDate = row.document().getDocDate();
-      boolean sameDoc = row.document().getId().equals(prevDocId);
-      boolean sameDate = docDate != null && docDate.equals(prevDate);
-      if (!sameDate) {
-        if (mergeStart >= 0 && rowIndex - 1 > mergeStart) {
-          sheet.addMergedRegion(new CellRangeAddress(mergeStart, rowIndex - 1, 9, 9));
-        }
-        mergeStart = rowIndex;
+    for (Line line : lines) {
+      Row row = sheet.getRow(rowIndex);
+      if (row == null) {
+        row = sheet.createRow(rowIndex);
       }
-      prevDocId = row.document().getId();
-      prevDate = docDate;
-
-      Row sheetRow = sheet.getRow(rowIndex);
-      if (sheetRow == null) {
-        sheetRow = sheet.createRow(rowIndex);
-      }
-      sheetRow.setHeightInPoints(IMAGE_ROW_HEIGHT);
-      DocumentItem item = row.item();
-      DocumentItemMarketMapping mapping = row.mapping();
-      setCell(sheetRow, 0, styles[0], seq++);
-      setCell(sheetRow, 1, styles[1], item.getMaterialName());
-      setCell(sheetRow, 2, styles[2], item.getSpec());
-      setCell(sheetRow, 3, styles[3], row.quantity());
-      setCell(sheetRow, 4, styles[4],
-          priceValue(mapping == null ? null : mapping.getQuotePrice()));
-      setCell(sheetRow, 5, styles[5],
-          priceValue(mapping == null ? null : mapping.getUplift()));
-      setCell(sheetRow, 6, styles[6],
-          mapping != null && mapping.getSalesUnitPrice() != null
-              ? mapping.getSalesUnitPrice() : item.getUnitPrice());
-      setCell(sheetRow, 7, styles[7], row.unit());
-      setCell(sheetRow, 8, styles[8],
-          mapping != null && mapping.getAmount() != null
-              ? mapping.getAmount() : item.getAmount());
-      setCell(sheetRow, 9, styles[9], row.document().getDocDate() == null
-          ? "" : row.document().getDocDate().toString());
-      setCell(sheetRow, 10, styles[10], null);
-      setCell(sheetRow, 11, styles[11], item.getRemark());
-
-      // 图片只在每张送货单的首行放一次；同日期多张发货单即连续行各放一张
-      if (!sameDoc) {
-        insertDeliveryImage(workbook, sheet, drawing, styles, rowIndex, row);
-      }
+      row.setHeightInPoints(DETAIL_ROW_HEIGHT);
+      LocalDate date = line.document().getDocDate();
+      boolean firstOfDate = date != null && !date.equals(prevDate);
+      prevDate = date;
+      setCell(row, COL_SEQ, styles[COL_SEQ], seq++);
+      setCell(row, COL_NAME, styles[COL_NAME], line.name());
+      setCell(row, COL_SPEC, styles[COL_SPEC], line.spec());
+      setCell(row, COL_QTY, styles[COL_QTY], line.quantity());
+      setCell(row, COL_QUOTE, styles[COL_QUOTE], line.quotePrice());
+      setCell(row, COL_UPLIFT, styles[COL_UPLIFT], line.uplift());
+      setCell(row, COL_PRICE, styles[COL_PRICE], line.unitPrice());
+      setCell(row, COL_AMOUNT, styles[COL_AMOUNT], line.amount());
+      setCell(row, COL_DATE, styles[COL_DATE],
+          firstOfDate ? date.getMonthValue() + "月" + date.getDayOfMonth() + "日" : null);
+      setCell(row, COL_REMARK, styles[COL_REMARK], line.remark());
       rowIndex++;
     }
-    if (mergeStart >= 0 && rowIndex - 1 > mergeStart) {
-      sheet.addMergedRegion(new CellRangeAddress(mergeStart, rowIndex - 1, 9, 9));
-    }
+    return n - 1;
   }
 
   private CellStyle[] captureRowStyles(Sheet sheet, int styledRowIndex) {
@@ -346,6 +575,7 @@ public class ReconciliationExportService {
     style.setBorderBottom(org.apache.poi.ss.usermodel.BorderStyle.THIN);
     style.setBorderLeft(org.apache.poi.ss.usermodel.BorderStyle.THIN);
     style.setBorderRight(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+    style.setWrapText(true);
     return style;
   }
 
@@ -356,14 +586,30 @@ public class ReconciliationExportService {
     }
     cell.setCellStyle(style);
     if (value == null || (value instanceof String text && text.isEmpty())) {
-      cell.setCellValue("");
+      cell.setBlank();
       return;
     }
     if (value instanceof BigDecimal number) {
       cell.setCellValue(number.doubleValue());
+    } else if (value instanceof Number number) {
+      cell.setCellValue(number.doubleValue());
     } else {
       cell.setCellValue(String.valueOf(value));
     }
+  }
+
+  private void setText(Sheet sheet, int rowIndex, int col, String value) {
+    Row row = sheet.getRow(rowIndex);
+    if (row == null) {
+      return;
+    }
+    Cell cell = row.getCell(col);
+    if (cell == null) {
+      cell = row.createCell(col);
+    }
+    // 模板单元格是 inlineStr 时 POI 的 setCellValue 不覆盖原值，必须先清空
+    cell.setBlank();
+    cell.setCellValue(value);
   }
 
   /** 网价/上浮无锁定值时按模板惯例写 '/' */
@@ -371,112 +617,16 @@ public class ReconciliationExportService {
     return value == null ? "/" : value;
   }
 
-  /**
-   * K 列插入原始送货单图片：保持宽高比，按行高缩放，在单元格内水平居中；
-   * 取不到图降级写送货单编号。
-   */
-  private void insertDeliveryImage(
-      Workbook workbook, Sheet sheet, Drawing<?> drawing,
-      CellStyle[] styles, int rowIndex, DetailRow row
-  ) {
-    Row sheetRow = sheet.getRow(rowIndex);
-    String fallbackText = StringUtils.hasText(row.document().getDocCode())
-        ? row.document().getDocCode() : nzStr(row.document().getFileName());
-    byte[] image = readDeliveryImage(row.document());
-    if (image == null || image.length == 0) {
-      setCell(sheetRow, 10, styles[10], fallbackText);
-      return;
-    }
-    PictureType type = detectPictureType(image);
-    if (type == null) {
-      setCell(sheetRow, 10, styles[10], fallbackText);
-      return;
-    }
-    java.awt.image.BufferedImage decoded = decodeImageSize(image);
-    if (decoded == null || decoded.getWidth() <= 0 || decoded.getHeight() <= 0) {
-      setCell(sheetRow, 10, styles[10], fallbackText);
-      return;
-    }
-
-    // 等比缩放：最长边适配单元格（比例取 min，图片完整落在格内不超出），水平+垂直居中
-    double cellHeightPx = IMAGE_ROW_HEIGHT * 96.0 / 72.0;
-    double cellWidthPx = sheet.getColumnWidthInPixels(IMAGE_COLUMN);
-    double scale = Math.min(cellWidthPx / decoded.getWidth(), cellHeightPx / decoded.getHeight());
-    int drawWidthPx = Math.max(1, (int) Math.round(decoded.getWidth() * scale));
-    int drawHeightPx = Math.max(1, (int) Math.round(decoded.getHeight() * scale));
-
-    // 起点居中（图片宽于/高于单元格时钳住负偏移）；终点 marker 沿列累进
-    long dx1Emu = Math.max(0, Math.round((cellWidthPx - drawWidthPx) / 2.0 * EMU_PER_PX));
-    long dy1Emu = Math.max(0, Math.round((cellHeightPx - drawHeightPx) / 2.0 * EMU_PER_PX));
-    long drawWidthEmu = Math.round(drawWidthPx * EMU_PER_PX);
-    long firstColEmu = Math.round(sheet.getColumnWidthInPixels(IMAGE_COLUMN) * EMU_PER_PX) - dx1Emu;
-    int endCol = IMAGE_COLUMN;
-    long remaining = drawWidthEmu;
-    long colEmu = firstColEmu;
-    while (remaining > colEmu) {
-      remaining -= colEmu;
-      endCol++;
-      colEmu = Math.round(sheet.getColumnWidthInPixels(endCol) * EMU_PER_PX);
-    }
-
-    int pictureIndex = workbook.addPicture(image, type == PictureType.PNG
-        ? Workbook.PICTURE_TYPE_PNG : Workbook.PICTURE_TYPE_JPEG);
-    ClientAnchor anchor = workbook.getCreationHelper().createClientAnchor();
-    anchor.setCol1(IMAGE_COLUMN);
-    anchor.setRow1(rowIndex);
-    anchor.setDx1((int) dx1Emu);
-    anchor.setDy1((int) dy1Emu);
-    anchor.setCol2(endCol);
-    anchor.setRow2(rowIndex);
-    anchor.setDx2((int) Math.min(remaining, Integer.MAX_VALUE));
-    anchor.setDy2((int) Math.min(Math.round(dy1Emu + drawHeightPx * EMU_PER_PX), Integer.MAX_VALUE));
-    anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
-    drawing.createPicture(anchor, pictureIndex);
-  }
-
-  private java.awt.image.BufferedImage decodeImageSize(byte[] bytes) {
-    try {
-      return javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
-    } catch (Exception ex) {
-      return null;
-    }
-  }
-
-  private byte[] readDeliveryImage(Document document) {
-    if (!StringUtils.hasText(document.getFileObjectKey())) {
-      return null;
-    }
-    try {
-      byte[] bytes = fileStorage.read(document.getFileObjectKey());
-      return bytes == null || bytes.length == 0 ? null : bytes;
-    } catch (Exception ex) {
-      return null;
-    }
-  }
-
-  private PictureType detectPictureType(byte[] bytes) {
-    if (bytes.length < 4) {
-      return null;
-    }
-    if ((bytes[0] & 0xFF) == 0x89 && bytes[1] == 'P') {
-      return PictureType.PNG;
-    }
-    if ((bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8) {
-      return PictureType.JPEG;
-    }
-    return null;
-  }
-
-  private void writeTotals(Sheet sheet, int offset, List<DetailRow> detailRows) {
-    Row totals = sheet.getRow(TPL_TAIL_FIRST - 1 + offset);
+  private void writeTotals(Sheet sheet, int offset, List<Line> lines) {
+    Row totals = sheet.getRow(TPL_TOTAL_ROW - 1 + offset);
     if (totals == null) {
       return;
     }
-    if (totals.getCell(3) != null) {
-      totals.getCell(3).setCellValue(sumQuantity(detailRows).doubleValue());
+    if (totals.getCell(COL_QTY) != null) {
+      totals.getCell(COL_QTY).setCellValue(sumQuantity(lines).doubleValue());
     }
-    if (totals.getCell(8) != null) {
-      totals.getCell(8).setCellValue(sumAmount(detailRows).doubleValue());
+    if (totals.getCell(COL_AMOUNT) != null) {
+      totals.getCell(COL_AMOUNT).setCellValue(sumAmount(lines).doubleValue());
     }
   }
 
@@ -486,13 +636,13 @@ public class ReconciliationExportService {
       BigDecimal cumulativeQuantity, BigDecimal cumulativeAmount,
       BigDecimal rangePaid, BigDecimal cumulativePaid
   ) {
-    // 行10 本次供应量 / 累计供应量；行11 本次供货金额 / 累计供货金额；行12 本次支付 / 累计已支付
+    // 行10 本次 / 累计供应量；行11 本次 / 累计供货金额；行12 本次 / 累计已支付（C 列本次，H 列累计）
     setSummaryValue(sheet, 10 + offset, 2, rangeQuantity);
-    setSummaryValue(sheet, 10 + offset, 9, cumulativeQuantity);
+    setSummaryValue(sheet, 10 + offset, 7, cumulativeQuantity);
     setSummaryValue(sheet, 11 + offset, 2, rangeAmount);
-    setSummaryValue(sheet, 11 + offset, 9, cumulativeAmount);
+    setSummaryValue(sheet, 11 + offset, 7, cumulativeAmount);
     setSummaryValue(sheet, 12 + offset, 2, rangePaid);
-    setSummaryValue(sheet, 12 + offset, 9, cumulativePaid);
+    setSummaryValue(sheet, 12 + offset, 7, cumulativePaid);
   }
 
   private void setSummaryValue(Sheet sheet, int rowNumber1Based, int col, BigDecimal value) {
@@ -510,38 +660,19 @@ public class ReconciliationExportService {
   // 汇总
   // ---------------------------------------------------------------------------
 
-  /** 数量合计：保留原始精度，不做舍入 */
-  private BigDecimal sumQuantity(List<DetailRow> rows) {
-    return rows.stream()
-        .map(DetailRow::quantity)
+  /** 数量合计：只算材料行（运费行无数量），保留原始精度 */
+  static BigDecimal sumQuantity(List<Line> lines) {
+    return lines.stream()
+        .filter(line -> !line.freight())
+        .map(Line::quantity)
         .map(ReconciliationExportService::nz)
         .reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
-  /** 金额合计：明细金额本身已是货币 2 位，求和不额外舍入 */
-  private BigDecimal sumAmount(List<DetailRow> rows) {
-    BigDecimal total = BigDecimal.ZERO;
-    for (DetailRow row : rows) {
-      BigDecimal amount = row.mapping() != null && row.mapping().getAmount() != null
-          ? row.mapping().getAmount() : row.item().getAmount();
-      total = total.add(nz(amount));
-    }
-    return total;
-  }
-
-  private BigDecimal cumulativeQuantity(List<Document> deliveries) {
-    List<DetailRow> rows = loadDetailRows(deliveries);
-    return sumQuantity(rows);
-  }
-
-  private BigDecimal cumulativeAmount(List<Document> deliveries) {
-    List<DetailRow> rows = loadDetailRows(deliveries);
-    return sumAmount(rows);
-  }
-
-  private BigDecimal sumDocAmount(List<Document> documents) {
-    return documents.stream()
-        .map(Document::getAmount)
+  /** 金额合计：材料小计 + 运费 */
+  static BigDecimal sumAmount(List<Line> lines) {
+    return lines.stream()
+        .map(Line::amount)
         .map(ReconciliationExportService::nz)
         .reduce(BigDecimal.ZERO, BigDecimal::add);
   }

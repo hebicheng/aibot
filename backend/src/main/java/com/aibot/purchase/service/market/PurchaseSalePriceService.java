@@ -153,7 +153,8 @@ public class PurchaseSalePriceService {
   /** 单行取价：人工值优先，其次按口径推算。 */
   public Price priceOf(DocumentItem item, DeliveryNetPriceService.PricingPolicy policy,
                        DocumentItemMarketMapping mapping) {
-    return priceOf(item, policy, mapping, item == null ? null : item.getSalesUnitPrice());
+    // 便捷入口无材料行上下文，拿不到人工网价，传 null 回退到锁定行情价（与批量入口一致）
+    return priceOf(item, policy, mapping, item == null ? null : item.getSalesUnitPrice(), null);
   }
 
   private Price priceOf(DocumentItem item, DeliveryNetPriceService.PricingPolicy policy,

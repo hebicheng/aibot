@@ -35,6 +35,14 @@ import org.springframework.http.HttpStatus;
 
 @ExtendWith(MockitoExtension.class)
 class LedgerServiceTest {
+  @org.junit.jupiter.api.BeforeAll
+  static void initializeReceiptMetadata() {
+    var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(
+        new com.baomidou.mybatisplus.core.MybatisConfiguration(), "");
+    assistant.setCurrentNamespace("LedgerServiceTest");
+    com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant,
+        com.aibot.purchase.entity.ProjectReceipt.class);
+  }
   @Mock private DocumentMapper documentMapper;
   @Mock private DocumentItemMapper documentItemMapper;
   @Mock private com.aibot.purchase.mapper.DocumentItemMarketMappingMapper itemNetMappingMapper;
@@ -44,6 +52,8 @@ class LedgerServiceTest {
   @Mock private BatchHintService batchHintService;
   @Mock private com.aibot.purchase.service.market.PurchaseSalePriceService salePriceService;
   @Mock private FreightService freightService;
+  @Mock private com.aibot.purchase.mapper.ProjectReceiptMapper receiptMapper;
+  @Mock private com.aibot.purchase.mapper.ProjectReceiptAllocationMapper allocationMapper;
   @Mock private PurchaseCostBasisService costBasisService;
 
   private LedgerService service;
@@ -61,6 +71,8 @@ class LedgerServiceTest {
         batchHintService,
         salePriceService,
         freightService,
+        receiptMapper,
+        allocationMapper,
         costBasisService
     );
     // 运费行由 FreightService 维护：单测里默认没有运费
@@ -70,6 +82,66 @@ class LedgerServiceTest {
     lenient().when(costBasisService.basis(anyString())).thenReturn(
         new PurchaseCostBasisService.Basis(false, BigDecimal.ZERO, BigDecimal.ZERO,
             BigDecimal.ZERO, BigDecimal.ZERO, 0, false, List.of()));
+  }
+
+  @Test
+  void receiptMetadataEditPreservesExistingMultiBatchAllocations() {
+    Batch batch = new Batch();
+    batch.setId("b1");
+    batch.setProjectId("p1");
+    when(batchMapper.selectById("b1")).thenReturn(batch);
+    com.aibot.purchase.entity.ProjectReceipt receipt = new com.aibot.purchase.entity.ProjectReceipt();
+    receipt.setId("r1");
+    receipt.setAmount(new BigDecimal("35000"));
+    when(receiptMapper.selectOne(any())).thenReturn(receipt);
+    Document doc = receiptDocument("35000");
+    service.correctConfirmedDocument(doc, List.of(), doc);
+    assertThat(receipt.getAmount()).isEqualByComparingTo("35000");
+    verify(allocationMapper, never()).updateById(any(com.aibot.purchase.entity.ProjectReceiptAllocation.class));
+    verify(allocationMapper, never()).insert(any(com.aibot.purchase.entity.ProjectReceiptAllocation.class));
+  }
+
+  @Test
+  void decreasingSourceReceiptReducesLastAllocationsWithoutNegativeAmounts() {
+    Batch batch = new Batch();
+    batch.setId("b1");
+    batch.setProjectId("p1");
+    when(batchMapper.selectById("b1")).thenReturn(batch);
+    com.aibot.purchase.entity.ProjectReceipt receipt = new com.aibot.purchase.entity.ProjectReceipt();
+    receipt.setId("r1");
+    receipt.setAmount(new BigDecimal("35000"));
+    when(receiptMapper.selectOne(any())).thenReturn(receipt);
+    var a1 = receiptAllocation("a1", "b1", "12000");
+    var a2 = receiptAllocation("a2", "b2", "10000");
+    var a3 = receiptAllocation("a3", "b3", "13000");
+    when(allocationMapper.selectList(any())).thenReturn(List.of(a1, a2, a3));
+    Document doc = receiptDocument("5000");
+    service.correctConfirmedDocument(doc, List.of(), doc);
+    assertThat(receipt.getAmount()).isEqualByComparingTo("5000");
+    assertThat(a1.getAmount()).isEqualByComparingTo("5000");
+    assertThat(a2.getAmount()).isZero();
+    assertThat(a3.getAmount()).isZero();
+  }
+
+  private Document receiptDocument(String amount) {
+    Document doc = new Document();
+    doc.setId("doc-r1");
+    doc.setBatchId("b1");
+    doc.setProjectId("p1");
+    doc.setDocType("receipt");
+    doc.setAmount(new BigDecimal(amount));
+    doc.setDocDate(LocalDate.of(2026, 11, 16));
+    return doc;
+  }
+
+  private com.aibot.purchase.entity.ProjectReceiptAllocation receiptAllocation(
+      String id, String batchId, String amount) {
+    var allocation = new com.aibot.purchase.entity.ProjectReceiptAllocation();
+    allocation.setId(id);
+    allocation.setReceiptId("r1");
+    allocation.setBatchId(batchId);
+    allocation.setAmount(new BigDecimal(amount));
+    return allocation;
   }
 
   @Test

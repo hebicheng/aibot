@@ -945,8 +945,20 @@ syncDocumentDerived() {
     this.setData({
       overlay: 'reconExport',
       drawer: false,
-      reconExportForm: { start: monthStart, end: iso(now) }
+      reconExportForm: { start: monthStart, end: iso(now), materialIndex: 0 },
+      reconMaterialOptions: ['全部材料']
     });
+    // 材料选项来自项目各批次填写的材料，选中后只导出这些批次
+    const { currentProject } = this.data;
+    if (currentProject && currentProject.id) {
+      api.reconciliationMaterials(currentProject.id)
+        .then((list) => this.setData({ reconMaterialOptions: ['全部材料'].concat(list || []) }))
+        .catch(() => undefined);
+    }
+  },
+
+  updateReconExportMaterial(event) {
+    this.setData({ 'reconExportForm.materialIndex': Number(event.detail.value) || 0 });
   },
 
   updateReconExportDate(event) {
@@ -968,7 +980,8 @@ syncDocumentDerived() {
     wx.showLoading({ title: '正在生成对账单', mask: true });
     try {
       const savedPath = await downloadFile({
-        url: api.reconciliationExportUrl(currentProject.id, form.start, form.end),
+        url: api.reconciliationExportUrl(currentProject.id, form.start, form.end,
+          form.materialIndex > 0 ? this.data.reconMaterialOptions[form.materialIndex] : ''),
         filePath
       });
       wx.hideLoading();

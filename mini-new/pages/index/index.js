@@ -171,7 +171,8 @@ const pageObject = {
     ledgerEditing: false,
     activeSales: null,
     activeRequested: null,
-    reconExportForm: { start: '', end: '' },
+    reconExportForm: { start: '', end: '', materialIndex: 0 },
+    reconMaterialOptions: ['全部材料'],
     editForm: null,
     ledgerHeaderRows: null,
     // 每周对账提醒（与 web 系统设置互通）
@@ -1290,12 +1291,43 @@ const pageObject = {
     if (!message || !value) return;
     const start = field === 'start' ? value : (message.payload.reconStart || '');
     const end = field === 'end' ? value : (message.payload.reconEnd || '');
-    this.patchCardMessage(msgId, { reconStart: start, reconEnd: end, reconSummaryText: '正在统计...' });
-    if (!start || !end || start > end) return;
+    this.patchCardMessage(msgId, { reconStart: start, reconEnd: end });
+    await this.refreshReconSummary(msgId);
+  },
+
+  // 材料下拉：首次点开时拉取项目批次材料，选中后刷新汇总
+  async loadReconMaterials(event) {
+    const msgId = event.currentTarget.dataset.msgId;
+    const message = this.findCardMessage(msgId);
+    if (!message || (message.payload.reconMaterialOptions || []).length > 1) return;
     try {
-      const summary = await api.reconciliationSummary(message.payload.projectId, start, end);
+      const list = await api.reconciliationMaterials(message.payload.projectId);
+      this.patchCardMessage(msgId, { reconMaterialOptions: ['全部材料'].concat(list || []) });
+    } catch (error) {
+      // 拉取失败保留「全部材料」
+    }
+  },
+
+  async updateReconMaterial(event) {
+    const msgId = event.currentTarget.dataset.msgId;
+    const message = this.findCardMessage(msgId);
+    if (!message) return;
+    const index = Number(event.detail.value) || 0;
+    const options = message.payload.reconMaterialOptions || ['全部材料'];
+    this.patchCardMessage(msgId, { reconMaterialIndex: index, reconMaterial: index > 0 ? options[index] : '' });
+    await this.refreshReconSummary(msgId);
+  },
+
+  async refreshReconSummary(msgId) {
+    const message = this.findCardMessage(msgId);
+    if (!message) return;
+    const { reconStart: start, reconEnd: end, reconMaterial: material, projectId } = message.payload;
+    if (!start || !end || start > end) return;
+    this.patchCardMessage(msgId, { reconSummaryText: '正在统计...' });
+    try {
+      const summary = await api.reconciliationSummary(projectId, start, end, material || '');
       this.patchCardMessage(msgId, {
-        reconSummaryText: `${summary.projectName || '当前项目'} · ${summary.customerName || '客户单位未设置'} · 送货单 ${summary.deliveries} 张 · 锁定销售额 ${summary.salesAmount != null ? money(summary.salesAmount) : '-'}`
+        reconSummaryText: `${summary.projectName || '当前项目'} · ${material || '全部材料'} · 送货单 ${summary.deliveries} 张 · 对账金额 ${summary.salesAmount != null ? money(summary.salesAmount) : '-'}`
       });
     } catch (error) {
       this.patchCardMessage(msgId, { reconSummaryText: '汇总加载失败，请重试' });
@@ -1315,7 +1347,7 @@ const pageObject = {
     const filePath = `${wx.env.USER_DATA_PATH}/reconciliation-${Date.now()}.xlsx`;
     try {
       const savedPath = await downloadFile({
-        url: api.reconciliationExportUrl(payload.projectId, payload.reconStart, payload.reconEnd),
+        url: api.reconciliationExportUrl(payload.projectId, payload.reconStart, payload.reconEnd, payload.reconMaterial || ''),
         filePath
       });
       this.patchCardMessage(msgId, { reconDownloading: false });

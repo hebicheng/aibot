@@ -42,6 +42,13 @@ import org.springframework.mock.web.MockMultipartFile;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentServiceTest {
+  @org.junit.jupiter.api.BeforeAll
+  static void initializeDocumentMetadata() {
+    var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(
+        new com.baomidou.mybatisplus.core.MybatisConfiguration(), "");
+    assistant.setCurrentNamespace("DocumentServiceTest");
+    com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, Document.class);
+  }
   @Mock private DocumentMapper documentMapper;
   @Mock private DocumentItemMapper documentItemMapper;
   @Mock private ChatMessageMapper chatMessageMapper;
@@ -650,11 +657,72 @@ class DocumentServiceTest {
     verify(ledgerService, never()).applyConfirmedDocument(any());
   }
 
+  @Test
+  void managementReceiptEditUpdatesDocumentCardAndKeepsOriginalAttachment() throws Exception {
+    Document receipt = supplementDocument("matched");
+    receipt.setDocType("receipt");
+    receipt.setAmount(new BigDecimal("30000"));
+    receipt.setFileUrl("/files/original-receipt.png");
+    receipt.setFileHash("original-hash");
+    receipt.setSourceText("原始回单金额 30000");
+    receipt.setSourceMessageId("receipt-message");
+    ChatMessage message = new ChatMessage();
+    message.setId("receipt-message");
+    when(documentMapper.selectOne(any())).thenReturn(receipt);
+    when(chatMessageMapper.selectById("receipt-message")).thenReturn(message);
+
+    service.syncReceiptFromManagement("user-1", "project-1", receipt.getId(),
+        new BigDecimal("35000"), LocalDate.of(2026, 11, 16), "新付款方");
+
+    assertThat(receipt.getAmount()).isEqualByComparingTo("35000");
+    assertThat(receipt.getDocDate()).isEqualTo(LocalDate.of(2026, 11, 16));
+    assertThat(receipt.getSupplierName()).isEqualTo("新付款方");
+    assertThat(receipt.getFileUrl()).isEqualTo("/files/original-receipt.png");
+    assertThat(receipt.getFileHash()).isEqualTo("original-hash");
+    assertThat(receipt.getSourceText()).isEqualTo("原始回单金额 30000");
+    assertThat(receipt.getBusinessFingerprint()).isNotBlank();
+    assertThat(objectMapper.readTree(receipt.getStructuredData()).get("amount").decimalValue())
+        .isEqualByComparingTo("35000");
+    assertThat(objectMapper.readTree(message.getPayload()).get("document").get("amount").decimalValue())
+        .isEqualByComparingTo("35000");
+    verify(ledgerService).correctConfirmedDocument(any(), any(), any(), any());
+
+    // 后续只改备注时，沿用已同步的金额，不回到原始凭证金额。
+    service.editDocument("user-1", receipt.getId(), Map.of("remark", "修改备注"));
+    assertThat(receipt.getAmount()).isEqualByComparingTo("35000");
+  }
+
+  @Test
+  void managementReceiptEditCanClearPayer() {
+    Document receipt = supplementDocument("matched");
+    receipt.setDocType("receipt");
+    when(documentMapper.selectOne(any())).thenReturn(receipt);
+    service.syncReceiptFromManagement("user-1", "project-1", receipt.getId(),
+        new BigDecimal("1000"), LocalDate.of(2026, 11, 16), null);
+    assertThat(receipt.getSupplierName()).isNull();
+    verify(documentMapper).update(org.mockito.ArgumentMatchers.isNull(), any());
+  }
+
+  @Test
+  void managementSyncRejectsWrongProjectOrNonReceiptSource() {
+    Document source = supplementDocument("matched");
+    when(documentMapper.selectOne(any())).thenReturn(source);
+    assertThatThrownBy(() -> service.syncReceiptFromManagement("user-1", "project-1", source.getId(),
+        new BigDecimal("1000"), LocalDate.of(2026, 11, 16), "付款方"))
+        .isInstanceOf(ApiException.class);
+    source.setDocType("receipt");
+    assertThatThrownBy(() -> service.syncReceiptFromManagement("user-1", "wrong-project", source.getId(),
+        new BigDecimal("1000"), LocalDate.of(2026, 11, 16), "付款方"))
+        .isInstanceOf(ApiException.class);
+    verify(documentMapper, never()).updateById(any(Document.class));
+    verify(ledgerService, never()).correctConfirmedDocument(any(), any(), any(), any());
+  }
+
   private BatchDto batch() {
     return new BatchDto(
         "batch-1", "project-1", "测试项目", "测试批次", LocalDate.of(2026, 7, 20),
         "钢筋", "进行中", 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-        BigDecimal.ZERO, null, java.util.Map.of(), null
+        BigDecimal.ZERO, null, java.util.Map.of(), null, false, BigDecimal.ZERO, "未收款"
     );
   }
 

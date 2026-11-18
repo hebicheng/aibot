@@ -77,6 +77,8 @@ import { DataCenterPage } from './DataCenterPage';
 import { summarizeBatchDelivery } from './deliveryMatching';
 import { MarketPage } from './MarketPage';
 import { ReconciliationLedgerPage } from './ReconciliationLedgerPage';
+import { ReceiptPanel, receiptTone } from './ReceiptPanel';
+import { CompanyTransactionsPage } from './CompanyTransactionsPage';
 import type {
   Batch,
   BusinessDocument,
@@ -247,8 +249,11 @@ const mapProjects = (apiProjects: ApiProject[], apiBatches: ApiBatch[]): Project
         paid: 0,
         invoiced: 0,
         salesInvoiced: 0,
-        received: 0,
+        received: Number(batch.receivedAmount || 0),
         progress: Number(batch.progress || 0),
+        sales: Number(batch.salesAmount || 0),
+        reconciled: Boolean(batch.reconciled),
+        receiptStatus: batch.receiptStatus || '未收款',
         businessHints: batch.businessHints
       }));
     return {
@@ -266,6 +271,7 @@ const mapProjects = (apiProjects: ApiProject[], apiBatches: ApiBatch[]): Project
       salesInvoiced: Number(project.salesInvoiceAmount || 0),
       received: Number(project.receivedAmount || 0),
       receivable: Number(project.outstanding || 0),
+      differenceAmount: Number(project.differenceAmount || 0),
       uninvoicedSales: Number(project.uninvoicedSales || 0),
       profit: Number(project.profitAmount || 0),
       marginRate: Number(project.marginRate || 0),
@@ -407,6 +413,7 @@ const navItems: Array<{
   { key: 'projects', label: '项目与批次', description: '核心业务单位', icon: FolderKanban },
   { key: 'documents', label: '数据中心', description: '业务数据与原始资料', icon: FileSearch },
   { key: 'ledger', label: '对账台账', description: '票款货核对', icon: TableProperties },
+  { key: 'company', label: '公司往来', description: '供货商发票往来', icon: Building2 },
   { key: 'market', label: '市场行情', description: '价格对比与行情', icon: TrendingUp }
 ];
 
@@ -1647,7 +1654,10 @@ function ProjectsPage({
   onDeleteProject,
   onDeleteBatch,
   onEditProject,
-  onEditBatch
+  onEditBatch,
+  onToggleReconciled,
+  onReceiptsChanged,
+  onToast
 }: {
   projectsData: Project[];
   selectedProject: Project;
@@ -1663,6 +1673,9 @@ function ProjectsPage({
   onDeleteBatch: (batch: Batch, project: Project) => void;
   onEditProject: (project: Project) => void;
   onEditBatch: (batch: Batch, project: Project) => void;
+  onToggleReconciled: (batch: Batch, reconciled: boolean) => void;
+  onReceiptsChanged: () => Promise<void> | void;
+  onToast: (message: string) => void;
 }) {
   const batchDocuments = documents.filter((item) => item.batchId === selectedBatch.id);
   const deliverySummary = summarizeBatchDelivery(
@@ -1831,9 +1844,15 @@ function ProjectsPage({
                   hint="客户回款累计"
                 />
                 <Metric
-                  label="应收款"
+                  label="应收差额"
+                  value={money(selectedProject.differenceAmount)}
+                  hint="合同总额 − 总收款，负值表示多收"
+                  tone={selectedProject.differenceAmount < 0 ? 'danger' : ''}
+                />
+                <Metric
+                  label="剩余应收"
                   value={money(selectedProject.receivable)}
-                  hint="合同总额 − 总收款"
+                  hint="应收差额下限为 0，与台账一致"
                 />
                 <Metric
                   label="未开票"
@@ -1879,8 +1898,8 @@ function ProjectsPage({
                     <th>采购金额</th>
                     <th>已付款</th>
                     <th>已开票</th>
-                    <th>对账进度</th>
-                    <th>状态</th>
+                    <th>是否已对账</th>
+                    <th>是否已收款</th>
                     <th className="batch-op-col">操作</th>
                   </tr>
                 </thead>
@@ -1899,14 +1918,19 @@ function ProjectsPage({
                       <td>{money(batch.purchase)}</td>
                       <td>{money(batch.paid)}</td>
                       <td>{money(batch.invoiced)}</td>
-                      <td>
-                        <div className="table-progress">
-                          <i style={{ width: `${batch.progress}%` }} />
-                          <span>{batch.progress}%</span>
-                        </div>
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <label className="reconciled-toggle" title="手动勾选：是否已对账">
+                          <input
+                            type="checkbox"
+                            checked={batch.reconciled}
+                            onChange={(event) => onToggleReconciled(batch, event.target.checked)}
+                            aria-label={`${batch.name} 是否已对账`}
+                          />
+                          <span>{batch.reconciled ? '已对账' : '未对账'}</span>
+                        </label>
                       </td>
                       <td>
-                        <StatusBadge tone={statusTone[batch.status]}>{batch.status}</StatusBadge>
+                        <StatusBadge tone={receiptTone[batch.receiptStatus]}>{batch.receiptStatus}</StatusBadge>
                       </td>
                       <td className="batch-op-col">
                         <span className="batch-ops">
@@ -1957,6 +1981,12 @@ function ProjectsPage({
               </table>
             </div>
           </Panel>
+          <ReceiptPanel
+            projectId={selectedProject.id}
+            refreshKey={selectedProject.batches.map((b) => `${b.id}:${b.sales}:${b.received}`).join('|')}
+            onChanged={onReceiptsChanged}
+            onToast={onToast}
+          />
           <Panel
             title="当前批次业务闭环"
             eyebrow={selectedBatch.name}
@@ -3207,7 +3237,7 @@ function LedgerPage({
       '销售单号',
       '销售金额',
       '已收款',
-      '未回款',
+      '剩余应收',
       '状态'
     ];
     const rows = ledgerRows.map((row) => [
@@ -3268,7 +3298,7 @@ function LedgerPage({
         <Metric label="已付款" value={money(totalPaid)} />
         <Metric label="未付款" value={money(totalUnpaid)} tone="danger" />
         <Metric label="进项票金额" value={money(totalInvoice)} tone="success" />
-        {view === 'sales' && <Metric label="未回款金额" value={money(totalOutstanding)} tone="danger" />}
+        {view === 'sales' && <Metric label="剩余应收金额" value={money(totalOutstanding)} tone="danger" />}
       </div>
 
       <Panel className="ledger-panel">
@@ -3326,7 +3356,7 @@ function LedgerPage({
                     <th>销售单号</th>
                     <th>销售金额</th>
                     <th>已收款</th>
-                    <th>未回款</th>
+                    <th>剩余应收</th>
                     <th>收款进度</th>
                   </>
                 )}
@@ -3411,7 +3441,7 @@ function LedgerPage({
         </div>
         <div className="ledger-note">
           <AlertCircle size={16} />
-          红色金额表示未回款或存在差异。每一行均可追溯到原始单据、大模型识别结果和人工修改记录。
+          红色金额表示剩余应收或存在差异。每一行均可追溯到原始单据、大模型识别结果和人工修改记录。
         </div>
       </Panel>
     </div>
@@ -3811,7 +3841,8 @@ export default function App() {
             paid: rows.reduce((sum, row) => sum + Number(row.paidAmount || 0), 0),
             invoiced: rows.reduce((sum, row) => sum + Number(row.invoiceAmount || 0), 0),
             salesInvoiced: rows.reduce((sum, row) => sum + Number(row.salesInvoiceAmount || 0), 0),
-            received: rows.reduce((sum, row) => sum + Number(row.receivedAmount || 0), 0)
+            // 已收款以项目收款分摊为准（批次接口已带出），没有台账行的批次也能显示收款
+            received: batch.received
           };
         })
       }))
@@ -4015,6 +4046,27 @@ export default function App() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : '项目更新失败');
     }
+  };
+
+  /** 是否已对账：人工勾选，乐观更新，失败回滚 */
+  const toggleReconciled = async (batch: Batch, reconciled: boolean) => {
+    const patch = (value: boolean) => setProjectsData((items) => items.map((project) => ({
+      ...project,
+      batches: project.batches.map((item) => (item.id === batch.id ? { ...item, reconciled: value } : item))
+    })));
+    patch(reconciled);
+    try {
+      await api.updateBatch(batch.id, { reconciled });
+    } catch (error) {
+      patch(!reconciled);
+      showToast(error instanceof Error ? error.message : '更新对账状态失败');
+    }
+  };
+
+  /** 收款变动 → 项目汇总、批次收款状态、台账都要刷新 */
+  const reloadAfterReceipt = async () => {
+    const loaded = await loadBaseData(projectId, batchId);
+    await refreshContext(loaded.projectId, loaded.batchId, loaded.projects);
   };
 
   const updateBatch = async (payload: BatchCreatePayload) => {
@@ -4369,11 +4421,11 @@ export default function App() {
   };
 
   // 对账单导出：模板渲染，按日期范围取送货单明细 + 项目累计
-  const exportReconciliation = async (start: string, end: string) => {
+  const exportReconciliation = async (start: string, end: string, material?: string) => {
     if (!currentProject) {
       throw new Error('请先选择项目');
     }
-    const fileName = await api.downloadReconciliation(currentProject.id, start, end);
+    const fileName = await api.downloadReconciliation(currentProject.id, start, end, material);
     showToast(`对账单已导出：${fileName}`);
   };
 
@@ -4470,6 +4522,9 @@ export default function App() {
               onDeleteBatch={requestDeleteBatch}
               onEditProject={setEditProjectTarget}
               onEditBatch={(batch) => setEditBatchTarget(batch)}
+              onToggleReconciled={toggleReconciled}
+              onReceiptsChanged={reloadAfterReceipt}
+              onToast={showToast}
             />
           )}
           {hasContext && page === 'documents' && (
@@ -4493,6 +4548,16 @@ export default function App() {
               onUpdateBatch={updateLedgerBatch}
               onExportLedger={exportLedger}
               onExportReconciliation={exportReconciliation}
+            />
+          )}
+          {hasContext && page === 'company' && (
+            <CompanyTransactionsPage
+              companyName={profile?.companyName}
+              projects={projectsData}
+              currentProjectId={projectId}
+              currentBatchId={batchId}
+              onToast={showToast}
+              onChanged={reloadAfterReceipt}
             />
           )}
           {page === 'market' && (
