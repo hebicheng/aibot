@@ -2778,7 +2778,14 @@ function DeleteConfirmModal({
 
         <div className="delete-confirm-body">
           <AlertCircle size={20} />
-          <p>{target.detail}</p>
+          <p>
+            {target.detail}
+            {target.kind === 'project'
+              ? '全部批次、收款及分摊一起删除，无需手动解除关联。'
+              : target.kind === 'batch'
+                ? '整笔关联收款同时删除，其他关联批次已收款同步减少，相关收款的全部分摊及关联一并删除。'
+                : ''}
+          </p>
         </div>
 
         <div className="modal-actions">

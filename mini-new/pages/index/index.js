@@ -791,7 +791,7 @@ const pageObject = {
     const batchCount = project.batches ? project.batches.length : 0;
     wx.showModal({
       title: '删除项目',
-      content: `「${project.name}」及其下 ${batchCount} 个批次将被删除，单据、台账、附件等业务数据将从平台隐藏（数据保留可审计，可联系管理员恢复）。`,
+      content: `「${project.name}」及其下 ${batchCount} 个批次将被删除。全部批次、收款及分摊一起删除，无需手动解除关联。其他单据、台账从平台隐藏，原始附件保留；界面不支持恢复已删除的收款关联。`,
       confirmText: '删除',
       confirmColor: '#e5484d',
       success: async (res) => {
@@ -820,7 +820,7 @@ const pageObject = {
     if (!batch) return;
     wx.showModal({
       title: '删除批次',
-      content: `「${batch.name}」将被删除，其采购金额与进度不再计入「${project.name}」统计，关联单据、台账从平台隐藏（数据保留可审计）。`,
+      content: `「${batch.name}」将被删除。整笔关联收款同时删除，其他关联批次已收款同步减少，相关收款的全部分摊及关联一并删除。其采购金额与进度不再计入「${project.name}」统计，关联单据、台账从平台隐藏（数据保留可审计）。`,
       confirmText: '删除',
       confirmColor: '#e5484d',
       success: async (res) => {

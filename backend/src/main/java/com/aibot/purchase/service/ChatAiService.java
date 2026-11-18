@@ -45,6 +45,19 @@ public class ChatAiService {
     this.objectMapper = objectMapper;
   }
 
+  /**
+   * 启动自检（2026-11-18）：mock 关闭时必须配置 QWEN_API_KEY。
+   * 之前缺少 Key 会静默走 mockReply 返回假发票假收款，账目里可能混入演示数据；改为启动即失败。
+   */
+  @jakarta.annotation.PostConstruct
+  void requireConfiguredWhenMockDisabled() {
+    if (!aiProperties.mock() && !qwenClient.isConfigured()) {
+      throw new IllegalStateException(
+          "AI mock 已关闭，但未配置 ai.qwen.api-key（环境变量 QWEN_API_KEY）。"
+              + "请补上真实 Key，或在本地显式开启 ai.mock=true 后再启动。");
+    }
+  }
+
   public record AiContext(
       String companyName,
       String projectName,
@@ -101,8 +114,14 @@ public class ChatAiService {
           AiReply.text("non_business", "我没有读到有效内容，请上传单据或描述业务信息。"),
           QwenUsage.ZERO);
     }
-    if (aiProperties.mock() || !qwenClient.isConfigured()) {
+    if (aiProperties.mock()) {
       return new AiAnalysisResult(mockReply(userText), QwenUsage.ZERO);
+    }
+    if (!qwenClient.isConfigured()) {
+      // 已关闭 mock 但缺少 Key：明确报错，绝不返回假数据
+      return new AiAnalysisResult(
+          AiReply.text("non_business", "AI 未配置：请设置 QWEN_API_KEY，或将 ai.mock 改为 true 后再试。"),
+          QwenUsage.ZERO);
     }
     try {
       QwenResult result = qwenClient.completeJson(
@@ -148,8 +167,13 @@ public class ChatAiService {
           AiReply.text("non_business", "未收到有效文件，请重新上传。"),
           QwenUsage.ZERO);
     }
-    if (aiProperties.mock() || !qwenClient.isConfigured()) {
+    if (aiProperties.mock()) {
       return new AiAnalysisResult(mockReply(userText != null ? userText : "采购单"), QwenUsage.ZERO);
+    }
+    if (!qwenClient.isConfigured()) {
+      return new AiAnalysisResult(
+          AiReply.text("non_business", "AI 未配置：请设置 QWEN_API_KEY，或将 ai.mock 改为 true 后再试。"),
+          QwenUsage.ZERO);
     }
     try {
       String prompt = fileUserPrompt(userText, extractedText, context, priorClarification);
